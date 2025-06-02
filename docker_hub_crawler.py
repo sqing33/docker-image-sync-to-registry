@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 Docker Hub 镜像爬虫
 这个脚本用于从 Docker Hub 网站爬取镜像信息，包括官方镜像和用户镜像。
@@ -13,6 +12,7 @@ import re
 import time
 import os
 import random
+import sys
 from datetime import datetime
 
 
@@ -22,7 +22,7 @@ class DockerHubCrawler:
     用于爬取 Docker Hub 网站上的镜像信息
     """
 
-    def __init__(self):
+    def __init__(self, max_pages=None):
         # 设置请求头，模拟浏览器访问
         self.headers = {
             "User-Agent":
@@ -31,8 +31,9 @@ class DockerHubCrawler:
         self.base_url = "https://hub.docker.com"
         self.categories = []
         self.extracted_images = {}
-        # 从环境变量获取最大页数，默认为5
-        self.max_pages = int(os.getenv('MAX_PAGES', 5))
+        # 优先使用传入的参数，其次使用环境变量，最后使用默认值
+        self.max_pages = max_pages if max_pages is not None else int(
+            os.getenv('MAX_PAGES', 5))
 
     def extract_json_from_html(self, html_content):
         """
@@ -382,7 +383,7 @@ class DockerHubCrawler:
         """
         if max_pages is None:
             max_pages = self.max_pages
-            
+
         all_results = []
         try:
             # 获取分类列表
@@ -432,16 +433,24 @@ class DockerHubCrawler:
         print("\n脚本执行完毕。")
 
 
-if __name__ == "__main__":
-    import sys
-    
-    # 获取命令行参数中的最大页数
+def main():
+    # 从命令行参数获取最大页数
     max_pages = None
     if len(sys.argv) > 1:
         try:
             max_pages = int(sys.argv[1])
         except ValueError:
-            print(f"警告: 无效的页数参数 '{sys.argv[1]}'，将使用环境变量中的值")
-    
-    crawler = DockerHubCrawler()
-    crawler.crawl_categories(max_pages=max_pages)  # 使用命令行参数或环境变量中的值
+            print(f"警告: 无效的最大页数参数 '{sys.argv[1]}'，将使用默认值")
+
+    crawler = DockerHubCrawler(max_pages)
+    results = crawler.crawl_categories()
+    if results:
+        print(f"已达到指定的最大页数 {crawler.max_pages}，停止提取。")
+        crawler.save_results_to_file(results)
+        print("脚本执行完毕。")
+    else:
+        print("未找到任何镜像信息。")
+
+
+if __name__ == "__main__":
+    main()

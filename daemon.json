@@ -1,4 +1,9 @@
 {
-  "registry-mirrors": ["https://docker.1panel.live", "https://docker.1ms.run"],
-  "insecure-registries": ["192.168.1.100:1500"]
+  "registry-mirrors": [
+    "https://docker.1panel.live",
+    "https://docker.1ms.run"
+  ],
+  "insecure-registries": [
+    "192.168.1.100:1500"
+  ]
 }

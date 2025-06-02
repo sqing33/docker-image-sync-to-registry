@@ -115,7 +115,17 @@ get_arch_image_config_digest() {
 sync_images() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 开始执行镜像同步 ==================" | tee -a "$SYNC_LOG_FILE"
     
+    # 确保输出目录存在
+    mkdir -p "$IMAGE_LIST_DIR"
+    
     echo "$(date '+%Y-%m-%d %H:%M:%S') - 运行Python脚本获取最新镜像列表 (最多 $MAX_PAGES_PER_CATEGORY 页/分类)..." | tee -a "$SYNC_LOG_FILE"
+    
+    # 切换到输出目录
+    cd "$IMAGE_LIST_DIR" || {
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 无法切换到输出目录 '$IMAGE_LIST_DIR'" | tee -a "$SYNC_LOG_FILE"
+        return 1
+    }
+    
     if ! python3 "$PYTHON_SCRIPT_PATH" "$MAX_PAGES_PER_CATEGORY" 2>&1 | tee -a "$PYTHON_CRAWLER_LOG_FILE" | tee -a "$SYNC_LOG_FILE"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: Python 脚本 '$PYTHON_SCRIPT_PATH' 执行失败。" | tee -a "$SYNC_LOG_FILE"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
@@ -123,112 +133,121 @@ sync_images() {
     fi
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Python脚本执行完毕。" | tee -a "$SYNC_LOG_FILE"
 
+    # 查找最新的镜像列表文件
     LATEST_FILE=$(ls -t "${IMAGE_LIST_DIR}/docker_images_"*.txt 2>/dev/null | head -n1)
     
-    if [ -f "$LATEST_FILE" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 从文件 $LATEST_FILE 读取镜像列表..." | tee -a "$SYNC_LOG_FILE"
-        
-        # 使用 cat 和 while read 循环，确保最后一行也能处理
-        cat "$LATEST_FILE" | while IFS= read -r image_from_crawler || [ -n "$image_from_crawler" ]; do
-            if [ -z "$image_from_crawler" ]; then
-                continue
-            fi
-
-            echo "" | tee -a "$SYNC_LOG_FILE"
-            echo "-------------------------------------------------" | tee -a "$SYNC_LOG_FILE"
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - 处理原始爬取名称: $image_from_crawler" | tee -a "$SYNC_LOG_FILE"
-
-            # 解析镜像名称和标签
-            image_name_part=$(echo "$image_from_crawler" | cut -d: -f1)
-            image_tag_part=$(echo "$image_from_crawler" | cut -d: -f2)
-
-            if [ "$image_name_part" == "$image_tag_part" ] || [ -z "$image_tag_part" ]; then 
-                image_tag="latest"
-            else
-                image_tag="$image_tag_part"
-            fi
-            
-            # 处理官方镜像和用户镜像的命名
-            if ! echo "$image_name_part" | grep -q /; then
-                hub_image_name_ns="library/${image_name_part}"
-                image_name_for_local_repo="$image_name_part"
-                is_official_image=true
-            else
-                hub_image_name_ns="$image_name_part"
-                image_name_for_local_repo="$image_name_part"
-                is_official_image=false
-            fi
-
-            # 确定本地仓库中的镜像路径
-            if [ "$is_official_image" = true ] && [ "$REMOVE_LIBRARY_PREFIX_ON_LOCAL" = "true" ]; then
-                actual_local_repo_path="$image_name_for_local_repo"
-            else
-                actual_local_repo_path="$hub_image_name_ns"
-            fi
-            
-            hub_image_full="docker.io/${hub_image_name_ns}:${image_tag}"
-            local_image_full="${REGISTRY_URL}/${actual_local_repo_path}:${image_tag}"
-
-            echo "  源镜像 (Docker Hub): $hub_image_full" | tee -a "$SYNC_LOG_FILE"
-            echo "  目标镜像 (本地 Registry): $local_image_full" | tee -a "$SYNC_LOG_FILE"
-
-            # 获取并比较镜像的 Config Digest
-            echo "  获取 Docker Hub 镜像 Config Digest (平台: $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
-            hub_config_digest=$(get_arch_image_config_digest "$hub_image_full")
-
-            if [ -z "$hub_config_digest" ]; then
-                echo "  警告: 无法获取 Docker Hub 镜像 '$hub_image_full' 的 $TARGET_ARCH Config Digest. 跳过..." | tee -a "$SYNC_LOG_FILE"
-                continue
-            fi
-            echo "    Docker Hub ($TARGET_ARCH) Config Digest: $hub_config_digest" | tee -a "$SYNC_LOG_FILE"
-            
-            echo "  获取本地 Registry 镜像 Config Digest (平台: $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
-            local_config_digest=$(get_arch_image_config_digest "$local_image_full")
-            
-            if [ -n "$local_config_digest" ]; then
-                echo "    本地 Registry ($TARGET_ARCH) Config Digest: $local_config_digest" | tee -a "$SYNC_LOG_FILE"
-            else
-                echo "    本地 Registry 中不存在镜像 '$local_image_full' ($TARGET_ARCH) 或无法获取其 Config Digest。" | tee -a "$SYNC_LOG_FILE"
-            fi
-
-            # 根据 Config Digest 决定是否需要同步
-            if [ "$hub_config_digest" == "$local_config_digest" ] && [ -n "$hub_config_digest" ]; then
-                echo "  镜像 '$local_image_full' ($TARGET_ARCH) Config Digest 匹配。已是最新版本。跳过同步。" | tee -a "$SYNC_LOG_FILE"
-            else
-                echo "  Config Digest ('$hub_config_digest' vs '$local_config_digest') 不匹配或本地不存在。开始同步 '$hub_image_full' (将拉取 $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
-                
-                # 执行镜像同步的三个步骤：拉取、标记、推送
-                echo "    1. 拉取: $hub_image_full (指定平台: $TARGET_ARCH)" | tee -a "$SYNC_LOG_FILE"
-                if ! docker pull --platform "$TARGET_ARCH" "$hub_image_full"; then
-                    echo "    错误: 拉取 '$hub_image_full' (平台 $TARGET_ARCH) 失败。" | tee -a "$SYNC_LOG_FILE"
-                    continue
-                fi
-                
-                echo "    2. 标记: $hub_image_full -> $local_image_full" | tee -a "$SYNC_LOG_FILE"
-                if ! docker tag "$hub_image_full" "$local_image_full"; then
-                    echo "    错误: 标记镜像 '$hub_image_full' 为 '$local_image_full' 失败。" | tee -a "$SYNC_LOG_FILE"
-                    docker rmi "$hub_image_full" 2>/dev/null || true 
-                    continue
-                fi
-                
-                echo "    3. 推送: $local_image_full" | tee -a "$SYNC_LOG_FILE"
-                if ! docker push "$local_image_full"; then
-                    echo "    错误: 推送镜像 '$local_image_full' 失败。" | tee -a "$SYNC_LOG_FILE"
-                    docker rmi "$local_image_full" 2>/dev/null || true 
-                    docker rmi "$hub_image_full" 2>/dev/null || true  
-                    continue
-                fi
-                echo "  成功同步到 '$local_image_full'" | tee -a "$SYNC_LOG_FILE"
-            fi
-            
-            # 清理本地缓存
-            echo "  清理原始拉取的本地缓存: $hub_image_full ..." | tee -a "$SYNC_LOG_FILE"
-            docker rmi "$hub_image_full" 2>/dev/null || true 
-
-        done
-    else
+    if [ -z "$LATEST_FILE" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 未找到由 Python 脚本生成的镜像列表文件。" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
+        return 1
     fi
+    
+    if [ ! -f "$LATEST_FILE" ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 镜像列表文件 '$LATEST_FILE' 不存在。" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
+        return 1
+    }
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 从文件 $LATEST_FILE 读取镜像列表..." | tee -a "$SYNC_LOG_FILE"
+    
+    # 使用 cat 和 while read 循环，确保最后一行也能处理
+    cat "$LATEST_FILE" | while IFS= read -r image_from_crawler || [ -n "$image_from_crawler" ]; do
+        if [ -z "$image_from_crawler" ]; then
+            continue
+        fi
+
+        echo "" | tee -a "$SYNC_LOG_FILE"
+        echo "-------------------------------------------------" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 处理原始爬取名称: $image_from_crawler" | tee -a "$SYNC_LOG_FILE"
+
+        # 解析镜像名称和标签
+        image_name_part=$(echo "$image_from_crawler" | cut -d: -f1)
+        image_tag_part=$(echo "$image_from_crawler" | cut -d: -f2)
+
+        if [ "$image_name_part" == "$image_tag_part" ] || [ -z "$image_tag_part" ]; then 
+            image_tag="latest"
+        else
+            image_tag="$image_tag_part"
+        fi
+        
+        # 处理官方镜像和用户镜像的命名
+        if ! echo "$image_name_part" | grep -q /; then
+            hub_image_name_ns="library/${image_name_part}"
+            image_name_for_local_repo="$image_name_part"
+            is_official_image=true
+        else
+            hub_image_name_ns="$image_name_part"
+            image_name_for_local_repo="$image_name_part"
+            is_official_image=false
+        fi
+
+        # 确定本地仓库中的镜像路径
+        if [ "$is_official_image" = true ] && [ "$REMOVE_LIBRARY_PREFIX_ON_LOCAL" = "true" ]; then
+            actual_local_repo_path="$image_name_for_local_repo"
+        else
+            actual_local_repo_path="$hub_image_name_ns"
+        fi
+        
+        hub_image_full="docker.io/${hub_image_name_ns}:${image_tag}"
+        local_image_full="${REGISTRY_URL}/${actual_local_repo_path}:${image_tag}"
+
+        echo "  源镜像 (Docker Hub): $hub_image_full" | tee -a "$SYNC_LOG_FILE"
+        echo "  目标镜像 (本地 Registry): $local_image_full" | tee -a "$SYNC_LOG_FILE"
+
+        # 获取并比较镜像的 Config Digest
+        echo "  获取 Docker Hub 镜像 Config Digest (平台: $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
+        hub_config_digest=$(get_arch_image_config_digest "$hub_image_full")
+
+        if [ -z "$hub_config_digest" ]; then
+            echo "  警告: 无法获取 Docker Hub 镜像 '$hub_image_full' 的 $TARGET_ARCH Config Digest. 跳过..." | tee -a "$SYNC_LOG_FILE"
+            continue
+        fi
+        echo "    Docker Hub ($TARGET_ARCH) Config Digest: $hub_config_digest" | tee -a "$SYNC_LOG_FILE"
+        
+        echo "  获取本地 Registry 镜像 Config Digest (平台: $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
+        local_config_digest=$(get_arch_image_config_digest "$local_image_full")
+        
+        if [ -n "$local_config_digest" ]; then
+            echo "    本地 Registry ($TARGET_ARCH) Config Digest: $local_config_digest" | tee -a "$SYNC_LOG_FILE"
+        else
+            echo "    本地 Registry 中不存在镜像 '$local_image_full' ($TARGET_ARCH) 或无法获取其 Config Digest。" | tee -a "$SYNC_LOG_FILE"
+        fi
+
+        # 根据 Config Digest 决定是否需要同步
+        if [ "$hub_config_digest" == "$local_config_digest" ] && [ -n "$hub_config_digest" ]; then
+            echo "  镜像 '$local_image_full' ($TARGET_ARCH) Config Digest 匹配。已是最新版本。跳过同步。" | tee -a "$SYNC_LOG_FILE"
+        else
+            echo "  Config Digest ('$hub_config_digest' vs '$local_config_digest') 不匹配或本地不存在。开始同步 '$hub_image_full' (将拉取 $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
+            
+            # 执行镜像同步的三个步骤：拉取、标记、推送
+            echo "    1. 拉取: $hub_image_full (指定平台: $TARGET_ARCH)" | tee -a "$SYNC_LOG_FILE"
+            if ! docker pull --platform "$TARGET_ARCH" "$hub_image_full"; then
+                echo "    错误: 拉取 '$hub_image_full' (平台 $TARGET_ARCH) 失败。" | tee -a "$SYNC_LOG_FILE"
+                continue
+            fi
+            
+            echo "    2. 标记: $hub_image_full -> $local_image_full" | tee -a "$SYNC_LOG_FILE"
+            if ! docker tag "$hub_image_full" "$local_image_full"; then
+                echo "    错误: 标记镜像 '$hub_image_full' 为 '$local_image_full' 失败。" | tee -a "$SYNC_LOG_FILE"
+                docker rmi "$hub_image_full" 2>/dev/null || true 
+                continue
+            fi
+            
+            echo "    3. 推送: $local_image_full" | tee -a "$SYNC_LOG_FILE"
+            if ! docker push "$local_image_full"; then
+                echo "    错误: 推送镜像 '$local_image_full' 失败。" | tee -a "$SYNC_LOG_FILE"
+                docker rmi "$local_image_full" 2>/dev/null || true 
+                docker rmi "$hub_image_full" 2>/dev/null || true  
+                continue
+            fi
+            echo "  成功同步到 '$local_image_full'" | tee -a "$SYNC_LOG_FILE"
+        fi
+        
+        # 清理本地缓存
+        echo "  清理原始拉取的本地缓存: $hub_image_full ..." | tee -a "$SYNC_LOG_FILE"
+        docker rmi "$hub_image_full" 2>/dev/null || true 
+
+    done
     echo "-------------------------------------------------" | tee -a "$SYNC_LOG_FILE"
     echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步执行完毕 ==================" | tee -a "$SYNC_LOG_FILE"
 }

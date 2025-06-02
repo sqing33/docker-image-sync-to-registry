@@ -32,20 +32,26 @@ services:
     environment:
       # 私有仓库地址
       - REGISTRY_URL=192.168.1.100:1500
-      # 每天0点执行
-      - CRON_SCHEDULE=0 0 * * *
+      # 每天0点59分执行，避免与其他任务冲突
+      - CRON_SCHEDULE=59 0 * * *
       # 是否在启动时执行同步
-      - SYNC_ON_START=true
+      - SYNC_ON_START=false
       # 目标架构
       - TARGET_ARCH=linux/amd64
       # 代理设置
       - HTTP_PROXY=http://192.168.1.100:7890
       - HTTPS_PROXY=http://192.168.1.100:7890
-      - NO_PROXY=localhost,127.0.0.1,docker.1panel.live,192.168.1.100:1500
+      - NO_PROXY=localhost,127.0.0.1,192.168.1.100:1500,docker.1panel.live,https://docker.1ms.run
       # 设置获取 DockerHub 镜像列表最大页数，默认为5
-      - MAX_PAGES=3
+      - MAX_PAGES_PER_CATEGORY=3
     volumes:
+      # 挂载时间和时区配置
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      # 挂载 Docker 镜像加速源配置文件
       - /vol1/1000/Docker/docker-image-sync-to-registry/daemon.json:/etc/docker/daemon.json
+      # 挂载容器内 Docker 下载镜像的目录
+      - /vol3/1000/Docker镜像仓库/docker in docker 缓存:/var/lib/docker
     networks:
       - registry
 
