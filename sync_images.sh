@@ -21,6 +21,7 @@ PYTHON_SCRIPT_PATH="/app/docker_hub_crawler.py"  # Python爬虫脚本路径
 IMAGE_LIST_DIR="/app/output"  # 镜像列表输出目录
 LOG_DIR="/var/log"  # 日志目录
 MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"  # 控制Python脚本爬取的页数
+CUSTOM_IMAGES_FILE="/app/custom_images.txt"  # 自定义镜像列表文件路径
 
 # --- 辅助变量 ---
 # 将TARGET_ARCH分割成数组
@@ -78,6 +79,7 @@ log_config() {
     log_message "Python Script: $PYTHON_SCRIPT_PATH"
     log_message "Image List Directory: $IMAGE_LIST_DIR"
     log_message "Max Pages Per Category to Crawl: $MAX_PAGES_PER_CATEGORY"
+    log_message "Custom Images File: $CUSTOM_IMAGES_FILE"
     log_message "Log Files: $CRON_LOG_FILE, $SYNC_LOG_FILE, $PYTHON_CRAWLER_LOG_FILE"
     log_message "---------------------------"
     
@@ -140,23 +142,31 @@ sync_images() {
     # 确保输出目录存在
     mkdir -p "$IMAGE_LIST_DIR"
     
-    # 切换到输出目录
-    cd "$IMAGE_LIST_DIR" || {
-        log_message "错误: 无法切换到输出目录 '$IMAGE_LIST_DIR'"
-        return 1
-    }
-    
-    if ! python3 "$PYTHON_SCRIPT_PATH" 2>&1; then
-        log_message "错误: Python 脚本执行失败。"
-        return 1
-    fi
+    # 检查是否存在自定义镜像列表文件
+    if [ -f "$CUSTOM_IMAGES_FILE" ]; then
+        log_message "使用自定义镜像列表文件: $CUSTOM_IMAGES_FILE"
+        LATEST_FILE="$CUSTOM_IMAGES_FILE"
+    else
+        log_message "未找到自定义镜像列表文件，将使用爬虫获取镜像列表"
+        
+        # 切换到输出目录
+        cd "$IMAGE_LIST_DIR" || {
+            log_message "错误: 无法切换到输出目录 '$IMAGE_LIST_DIR'"
+            return 1
+        }
+        
+        if ! python3 "$PYTHON_SCRIPT_PATH" 2>&1; then
+            log_message "错误: Python 脚本执行失败。"
+            return 1
+        fi
 
-    # 查找最新的镜像列表文件
-    LATEST_FILE=$(ls -t "/app/output/docker_images_"*.txt 2>/dev/null | head -n1)
-    
-    if [ -z "$LATEST_FILE" ] || [ ! -f "$LATEST_FILE" ]; then
-        log_message "错误: 未找到有效的镜像列表文件。"
-        return 1
+        # 查找最新的镜像列表文件
+        LATEST_FILE=$(ls -t "/app/output/docker_images_"*.txt 2>/dev/null | head -n1)
+        
+        if [ -z "$LATEST_FILE" ] || [ ! -f "$LATEST_FILE" ]; then
+            log_message "错误: 未找到有效的镜像列表文件。"
+            return 1
+        fi
     fi
     
     # 使用 cat 和 while read 循环，确保最后一行也能处理
@@ -198,8 +208,16 @@ sync_images() {
 
         log_message "处理镜像: $hub_image_full"
 
+        # 创建一个临时目录来存储不同架构的镜像
+        temp_dir=$(mktemp -d)
+        trap 'rm -rf "$temp_dir"' EXIT
+
         # 遍历所有目标架构
         for target_arch in $TARGET_ARCHS; do
+            # 为每个架构创建临时标签
+            temp_tag="${image_tag}-${target_arch//\//-}"
+            temp_image="${REGISTRY_URL}/${actual_local_repo_path}:${temp_tag}"
+            
             # 获取并比较镜像的 Config Digest
             hub_config_digest=$(get_arch_image_config_digest "$hub_image_full" "$target_arch")
 
@@ -213,34 +231,63 @@ sync_images() {
             # 根据 Config Digest 决定是否需要同步
             if [ "$hub_config_digest" == "$local_config_digest" ] && [ -n "$hub_config_digest" ]; then
                 log_message "镜像 $local_image_full ($target_arch) 已是最新版本。跳过同步。"
-            else
-                log_message "开始同步 $hub_image_full ($target_arch)..."
-                
-                # 执行镜像同步的三个步骤：拉取、标记、推送
-                if ! docker pull --platform "$target_arch" "$hub_image_full"; then
-                    log_message "错误: 拉取失败。"
-                    continue
-                fi
-                
-                if ! docker tag "$hub_image_full" "$local_image_full"; then
-                    log_message "错误: 标记失败。"
-                    docker rmi "$hub_image_full" 2>/dev/null || true 
-                    continue
-                fi
-                
-                if ! docker push "$local_image_full"; then
-                    log_message "错误: 推送失败。"
-                    docker rmi "$local_image_full" 2>/dev/null || true 
-                    docker rmi "$hub_image_full" 2>/dev/null || true  
-                    continue
-                fi
-                log_message "成功同步到 $local_image_full ($target_arch)"
-                
-                # 清理本地缓存
-                docker rmi "$hub_image_full" 2>/dev/null || true 
-                docker rmi "$local_image_full" 2>/dev/null || true
+                continue
             fi
+
+            log_message "开始同步 $hub_image_full ($target_arch)..."
+            
+            # 执行镜像同步的三个步骤：拉取、标记、推送
+            if ! docker pull --platform "$target_arch" "$hub_image_full"; then
+                log_message "错误: 拉取失败。"
+                continue
+            fi
+            
+            if ! docker tag "$hub_image_full" "$temp_image"; then
+                log_message "错误: 标记失败。"
+                docker rmi "$hub_image_full" 2>/dev/null || true 
+                continue
+            fi
+            
+            if ! docker push "$temp_image"; then
+                log_message "错误: 推送失败。"
+                docker rmi "$temp_image" 2>/dev/null || true 
+                docker rmi "$hub_image_full" 2>/dev/null || true  
+                continue
+            fi
+            log_message "成功同步到 $temp_image"
+            
+            # 保存临时镜像信息
+            echo "$temp_image" >> "$temp_dir/arch_images.txt"
+            
+            # 清理本地缓存
+            docker rmi "$hub_image_full" 2>/dev/null || true 
+            docker rmi "$temp_image" 2>/dev/null || true
         done
+
+        # 如果成功同步了至少一个架构，创建多架构 manifest
+        if [ -f "$temp_dir/arch_images.txt" ]; then
+            log_message "创建多架构 manifest: $local_image_full"
+            
+            # 创建 manifest
+            if ! docker manifest create "$local_image_full" $(cat "$temp_dir/arch_images.txt"); then
+                log_message "错误: 创建 manifest 失败。"
+                continue
+            fi
+            
+            # 推送 manifest
+            if ! docker manifest push "$local_image_full"; then
+                log_message "错误: 推送 manifest 失败。"
+                docker manifest rm "$local_image_full" 2>/dev/null || true
+                continue
+            fi
+            
+            # 清理临时镜像
+            while read -r temp_image; do
+                docker manifest rm "$temp_image" 2>/dev/null || true
+            done < "$temp_dir/arch_images.txt"
+            
+            log_message "成功创建并推送多架构 manifest: $local_image_full"
+        fi
     done
     log_message "镜像同步执行完毕"
 }
