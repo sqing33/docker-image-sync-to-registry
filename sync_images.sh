@@ -256,22 +256,8 @@ sync_images() {
 ensure_dependencies
 log_config
 
-# 检查是否是通过cron调用的
 if [ "$1" = "sync" ]; then
-    # 检查是否已经有一个同步进程在运行
-    if [ -f "/tmp/sync_running" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 检测到另一个同步进程正在运行，跳过本次执行。" | tee -a "$SYNC_LOG_FILE"
-        exit 0
-    fi
-    
-    # 创建锁文件
-    touch "/tmp/sync_running"
-    
-    # 执行同步
     sync_images
-    
-    # 删除锁文件
-    rm -f "/tmp/sync_running"
     exit 0
 fi
 
