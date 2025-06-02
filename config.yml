@@ -1,0 +1,86 @@
+# 监听接口。
+listen_addr: 0.0.0.0:8000
+
+# Registry UI 的基础路径。
+uri_base_path: /
+
+# 后台任务。
+performance:
+  # 目录列表页面大小。这取决于底层存储性能。
+  catalog_page_size: 1000
+
+  # 目录（仓库列表）刷新间隔（分钟）。
+  # 如果设置为 0，则永远不会刷新，但会运行一次。
+  catalog_refresh_interval: 1
+
+  # 标签计数刷新间隔（分钟）。
+  # 如果设置为 0，则永远不会运行。这是一个快速操作。
+  tags_count_refresh_interval: 1
+
+# Registry 端点和认证。
+registry:
+  # Registry 主机名（不包含协议，但可以包含端口）。
+  hostname: 192.168.1.100:1500
+  # 允许访问非 HTTPS 启用的 registry。
+  insecure: true
+
+  # Registry 凭据。
+  # 它们需要对 registry 具有完全访问权限。
+  # 如果启用令牌认证服务，将自动发现并使用这些凭据
+  # 用于获取访问令牌。
+  username: user
+  password: pass
+  # 将密码设置为空白 '' 以便从下面的文件读取。否则，它将被忽略。
+  password_file: /run/secrets/registry_password_file
+
+  # 或者，您可以使用 Keychain 进行认证，这对于本地开发很有用。
+  # 启用后，上述凭据将不会被使用。
+  auth_with_keychain: false
+
+# UI 访问管理。
+access_control:
+  # 用户是否可以查看事件日志。否则，只有下面列出的管理员可以。
+  anyone_can_view_events: true
+  # 用户是否可以删除标签。否则，只有下面列出的管理员可以。
+  anyone_can_delete_tags: true
+  # 可以执行所有操作的用户列表。
+  # 用户标识应通过代理的 X-WEBAUTH-USER 头部设置，
+  # 因为 registry UI 本身不使用任何认证。
+  admins: []
+
+# 事件监听器配置。
+event_listener:
+  # Docker registry 上应配置相同的 token 作为 Authorization Bearer token。
+  bearer_token: xxx
+  # 保留记录的天数。
+  retention_days: 7
+
+  # 事件监听器存储。
+  database_driver: sqlite3
+  database_location: data/registry_events.db
+  # database_driver: mysql
+  # database_location: user:password@tcp(localhost:3306)/docker_events
+
+  # 在 MySQL 主主或集群设置上运行 registry UI 时，可以禁用某些主机上的事件删除，
+  # 以避免死锁或复制中断。
+  deletion_enabled: true
+
+# 标签清理选项。
+purge_tags:
+  # 保留标签的天数，但无论标签多旧，都会保留最少数量。
+  keep_days: 7
+  keep_count: 1
+
+  # 保留匹配正则表达式的标签，无论多旧，例如 '^latest$'
+  # 空字符串禁用此功能。
+  keep_regexp: ""
+
+  # 保留文件中列出的标签，无论多旧。
+  # 文件格式为 JSON: {"repo1": ["tag1", "tag2"], "repoX": ["tagX"]}
+  # 空字符串禁用此功能。
+  keep_from_file: ""
+
+# 调试模式。
+debug:
+  # 只影响模板。
+  templates: false
