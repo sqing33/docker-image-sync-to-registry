@@ -146,7 +146,7 @@ sync_images() {
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 镜像列表文件 '$LATEST_FILE' 不存在。" | tee -a "$SYNC_LOG_FILE"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
         return 1
-    }
+    fi
     
     echo "$(date '+%Y-%m-%d %H:%M:%S') - 从文件 $LATEST_FILE 读取镜像列表..." | tee -a "$SYNC_LOG_FILE"
     
