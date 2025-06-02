@@ -36,7 +36,7 @@ services:
       - CRON_SCHEDULE=59 0 * * *
       # 是否在启动时执行同步
       - SYNC_ON_START=false
-      # 目标架构
+      # 目标架构(linux/amd64,linux/arm64)
       - TARGET_ARCH=linux/amd64
       # 代理设置
       - HTTP_PROXY=http://192.168.1.100:7890

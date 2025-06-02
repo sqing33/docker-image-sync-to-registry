@@ -8,7 +8,7 @@
 REGISTRY_URL="${REGISTRY_URL}"  # 本地私有仓库的URL
 CRON_SCHEDULE="${CRON_SCHEDULE:-0 4 * * *}"  # 默认每天凌晨4点执行
 SYNC_ON_START="${SYNC_ON_START:-true}"  # 容器启动时是否立即同步
-TARGET_ARCH="${TARGET_ARCH:-linux/amd64}"  # 目标架构
+TARGET_ARCH="${TARGET_ARCH:-linux/amd64}"  # 目标架构，支持逗号分隔的多个架构
 REMOVE_LIBRARY_PREFIX_ON_LOCAL="${REMOVE_LIBRARY_PREFIX_ON_LOCAL:-true}"  # 是否移除本地镜像的library/前缀
 PYTHON_SCRIPT_PATH="/app/docker_hub_crawler.py"  # Python爬虫脚本路径
 IMAGE_LIST_DIR="/app/output"  # 镜像列表输出目录
@@ -16,8 +16,8 @@ LOG_DIR="/var/log"  # 日志目录
 MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"  # 控制Python脚本爬取的页数
 
 # --- 辅助变量 ---
-TARGET_OS=$(echo "$TARGET_ARCH" | cut -d/ -f1)  # 目标操作系统
-TARGET_ARCHITECTURE=$(echo "$TARGET_ARCH" | cut -d/ -f2)  # 目标架构
+# 将TARGET_ARCH分割成数组
+IFS=',' read -ra TARGET_ARCHS <<< "$TARGET_ARCH"
 CRON_LOG_FILE="${LOG_DIR}/cron.log"  # cron任务日志
 SYNC_LOG_FILE="${LOG_DIR}/sync_images_activity.log"  # 主同步日志
 PYTHON_CRAWLER_LOG_FILE="${LOG_DIR}/docker_hub_crawler_output.log"  # Python脚本的输出日志
@@ -67,8 +67,10 @@ log_config() {
 
 # 函数：获取指定架构的 Image Config Digest
 # 参数1: 完整的镜像名称 (例如 docker.io/library/nginx:latest)
+# 参数2: 目标架构
 get_arch_image_config_digest() {
     local full_image_name="$1"
+    local target_arch="$2"
     local manifest_json
     local platform_manifest_entry_digest
     local image_config_digest_value=""
@@ -86,7 +88,8 @@ get_arch_image_config_digest() {
     if [ "$is_manifest_list" = "true" ]; then
         # 从 manifest list 中获取指定平台的 manifest entry digest
         platform_manifest_entry_digest=$(echo "$manifest_json" | jq -r \
-            --arg OS_ARG "$TARGET_OS" --arg ARCH_ARG "$TARGET_ARCHITECTURE" \
+            --arg OS_ARG "$(echo "$target_arch" | cut -d/ -f1)" \
+            --arg ARCH_ARG "$(echo "$target_arch" | cut -d/ -f2)" \
             '.manifests[]? | select(.platform.os == $OS_ARG and .platform.architecture == $ARCH_ARG) | .digest' 2>/dev/null)
 
         if [ -n "$platform_manifest_entry_digest" ] && [ "$platform_manifest_entry_digest" != "null" ] && [ "$platform_manifest_entry_digest" != '""' ]; then
@@ -194,58 +197,63 @@ sync_images() {
         echo "  源镜像 (Docker Hub): $hub_image_full" >> "$SYNC_LOG_FILE"
         echo "  目标镜像 (本地 Registry): $local_image_full" >> "$SYNC_LOG_FILE"
 
-        # 获取并比较镜像的 Config Digest
-        echo "  获取 Docker Hub 镜像 Config Digest (平台: $TARGET_ARCH)..." >> "$SYNC_LOG_FILE"
-        hub_config_digest=$(get_arch_image_config_digest "$hub_image_full")
+        # 遍历所有目标架构
+        for target_arch in "${TARGET_ARCHS[@]}"; do
+            echo "  处理架构: $target_arch" >> "$SYNC_LOG_FILE"
+            
+            # 获取并比较镜像的 Config Digest
+            echo "  获取 Docker Hub 镜像 Config Digest (平台: $target_arch)..." >> "$SYNC_LOG_FILE"
+            hub_config_digest=$(get_arch_image_config_digest "$hub_image_full" "$target_arch")
 
-        if [ -z "$hub_config_digest" ]; then
-            echo "  警告: 无法获取 Docker Hub 镜像 '$hub_image_full' 的 $TARGET_ARCH Config Digest. 跳过..." >> "$SYNC_LOG_FILE"
-            continue
-        fi
-        echo "    Docker Hub ($TARGET_ARCH) Config Digest: $hub_config_digest" >> "$SYNC_LOG_FILE"
-        
-        echo "  获取本地 Registry 镜像 Config Digest (平台: $TARGET_ARCH)..." >> "$SYNC_LOG_FILE"
-        local_config_digest=$(get_arch_image_config_digest "$local_image_full")
-        
-        if [ -n "$local_config_digest" ]; then
-            echo "    本地 Registry ($TARGET_ARCH) Config Digest: $local_config_digest" >> "$SYNC_LOG_FILE"
-        else
-            echo "    本地 Registry 中不存在镜像 '$local_image_full' ($TARGET_ARCH) 或无法获取其 Config Digest。" >> "$SYNC_LOG_FILE"
-        fi
+            if [ -z "$hub_config_digest" ]; then
+                echo "  警告: 无法获取 Docker Hub 镜像 '$hub_image_full' 的 $target_arch Config Digest. 跳过..." >> "$SYNC_LOG_FILE"
+                continue
+            fi
+            echo "    Docker Hub ($target_arch) Config Digest: $hub_config_digest" >> "$SYNC_LOG_FILE"
+            
+            echo "  获取本地 Registry 镜像 Config Digest (平台: $target_arch)..." >> "$SYNC_LOG_FILE"
+            local_config_digest=$(get_arch_image_config_digest "$local_image_full" "$target_arch")
+            
+            if [ -n "$local_config_digest" ]; then
+                echo "    本地 Registry ($target_arch) Config Digest: $local_config_digest" >> "$SYNC_LOG_FILE"
+            else
+                echo "    本地 Registry 中不存在镜像 '$local_image_full' ($target_arch) 或无法获取其 Config Digest。" >> "$SYNC_LOG_FILE"
+            fi
 
-        # 根据 Config Digest 决定是否需要同步
-        if [ "$hub_config_digest" == "$local_config_digest" ] && [ -n "$hub_config_digest" ]; then
-            echo "  镜像 '$local_image_full' ($TARGET_ARCH) Config Digest 匹配。已是最新版本。跳过同步。" >> "$SYNC_LOG_FILE"
-        else
-            echo "  Config Digest ('$hub_config_digest' vs '$local_config_digest') 不匹配或本地不存在。开始同步 '$hub_image_full' (将拉取 $TARGET_ARCH)..." >> "$SYNC_LOG_FILE"
-            
-            # 执行镜像同步的三个步骤：拉取、标记、推送
-            echo "    1. 拉取: $hub_image_full (指定平台: $TARGET_ARCH)" >> "$SYNC_LOG_FILE"
-            if ! docker pull --platform "$TARGET_ARCH" "$hub_image_full"; then
-                echo "    错误: 拉取 '$hub_image_full' (平台 $TARGET_ARCH) 失败。" >> "$SYNC_LOG_FILE"
-                continue
+            # 根据 Config Digest 决定是否需要同步
+            if [ "$hub_config_digest" == "$local_config_digest" ] && [ -n "$hub_config_digest" ]; then
+                echo "  镜像 '$local_image_full' ($target_arch) Config Digest 匹配。已是最新版本。跳过同步。" >> "$SYNC_LOG_FILE"
+            else
+                echo "  Config Digest ('$hub_config_digest' vs '$local_config_digest') 不匹配或本地不存在。开始同步 '$hub_image_full' (将拉取 $target_arch)..." >> "$SYNC_LOG_FILE"
+                
+                # 执行镜像同步的三个步骤：拉取、标记、推送
+                echo "    1. 拉取: $hub_image_full (指定平台: $target_arch)" >> "$SYNC_LOG_FILE"
+                if ! docker pull --platform "$target_arch" "$hub_image_full"; then
+                    echo "    错误: 拉取 '$hub_image_full' (平台 $target_arch) 失败。" >> "$SYNC_LOG_FILE"
+                    continue
+                fi
+                
+                echo "    2. 标记: $hub_image_full -> $local_image_full" >> "$SYNC_LOG_FILE"
+                if ! docker tag "$hub_image_full" "$local_image_full"; then
+                    echo "    错误: 标记镜像 '$hub_image_full' 为 '$local_image_full' 失败。" >> "$SYNC_LOG_FILE"
+                    docker rmi "$hub_image_full" 2>/dev/null || true 
+                    continue
+                fi
+                
+                echo "    3. 推送: $local_image_full" >> "$SYNC_LOG_FILE"
+                if ! docker push "$local_image_full"; then
+                    echo "    错误: 推送镜像 '$local_image_full' 失败。" >> "$SYNC_LOG_FILE"
+                    docker rmi "$local_image_full" 2>/dev/null || true 
+                    docker rmi "$hub_image_full" 2>/dev/null || true  
+                    continue
+                fi
+                echo "  成功同步到 '$local_image_full' ($target_arch)" >> "$SYNC_LOG_FILE"
             fi
             
-            echo "    2. 标记: $hub_image_full -> $local_image_full" >> "$SYNC_LOG_FILE"
-            if ! docker tag "$hub_image_full" "$local_image_full"; then
-                echo "    错误: 标记镜像 '$hub_image_full' 为 '$local_image_full' 失败。" >> "$SYNC_LOG_FILE"
-                docker rmi "$hub_image_full" 2>/dev/null || true 
-                continue
-            fi
-            
-            echo "    3. 推送: $local_image_full" >> "$SYNC_LOG_FILE"
-            if ! docker push "$local_image_full"; then
-                echo "    错误: 推送镜像 '$local_image_full' 失败。" >> "$SYNC_LOG_FILE"
-                docker rmi "$local_image_full" 2>/dev/null || true 
-                docker rmi "$hub_image_full" 2>/dev/null || true  
-                continue
-            fi
-            echo "  成功同步到 '$local_image_full'" >> "$SYNC_LOG_FILE"
-        fi
-        
-        # 清理本地缓存
-        echo "  清理原始拉取的本地缓存: $hub_image_full ..." >> "$SYNC_LOG_FILE"
-        docker rmi "$hub_image_full" 2>/dev/null || true 
+            # 清理本地缓存
+            echo "  清理原始拉取的本地缓存: $hub_image_full ..." >> "$SYNC_LOG_FILE"
+            docker rmi "$hub_image_full" 2>/dev/null || true 
+        done
 
     done
     echo "-------------------------------------------------" >> "$SYNC_LOG_FILE"
