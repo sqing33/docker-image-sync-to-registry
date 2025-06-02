@@ -2,7 +2,8 @@
 
 # sync_images.sh
 # 这个脚本用于同步 Docker Hub 镜像到本地私有仓库
-# 它会定期从 Docker Hub 拉取镜像并推送到本地仓库
+# 它会定期从 Docker Hub 拉取镜像并推送到本地仓库，
+# 然后尝试删除用于构建多架构 manifest 的架构特定标签。
 
 # 添加日志函数
 log_message() {
@@ -21,8 +22,11 @@ REMOVE_LIBRARY_PREFIX_ON_LOCAL="${REMOVE_LIBRARY_PREFIX_ON_LOCAL:-true}"
 PYTHON_SCRIPT_PATH="/app/docker_hub_crawler.py"
 IMAGE_LIST_DIR="/app/output"
 LOG_DIR="/var/log"
-MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}" # 确保Python脚本使用此变量
+MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"
 CUSTOM_IMAGES_FILE="/app/custom_images.txt"
+# 如果 registry 需要认证，可以在这里设置，然后在 delete_remote_tag 中使用
+# REGISTRY_USER="${REGISTRY_USER:-}"
+# REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
 
 # --- 辅助变量 ---
 OLD_IFS="$IFS"
@@ -33,7 +37,7 @@ for arch_val; do
     TARGET_ARCHS="$TARGET_ARCHS $arch_val"
 done
 IFS="$OLD_IFS"
-TARGET_ARCHS=$(echo "$TARGET_ARCHS" | xargs) # Trim leading/trailing whitespace
+TARGET_ARCHS=$(echo "$TARGET_ARCHS" | xargs)
 
 CRON_LOG_FILE="${LOG_DIR}/cron.log"
 SYNC_LOG_FILE="${LOG_DIR}/sync_images_activity.log"
@@ -56,6 +60,16 @@ ensure_dependencies() {
             exit 1
         else
             log_message "jq 安装成功。"
+        fi
+    fi
+
+    if ! command -v curl > /dev/null; then
+        log_message "尝试安装 curl..."
+        if ! apk add --no-cache curl > /dev/null 2>&1; then
+            log_message "错误: curl 安装失败。请手动安装。"
+            exit 1
+        else
+            log_message "curl 安装成功。"
         fi
     fi
     
@@ -95,11 +109,9 @@ get_arch_image_config_digest() {
     local platform_manifest_entry_digest
     local image_config_digest_value=""
 
-    # log_message "DEBUG: get_arch_image_config_digest for '$full_image_name', arch '$target_arch'"
     manifest_json=$(docker manifest inspect "$full_image_name" 2>/dev/null)
 
     if [ -z "$manifest_json" ]; then
-        # log_message "DEBUG: docker manifest inspect '$full_image_name' returned empty."
         echo ""
         return
     fi
@@ -107,15 +119,12 @@ get_arch_image_config_digest() {
     is_manifest_list=$(echo "$manifest_json" | jq 'if type == "array" then false else (.manifests | type == "array" and length > 0) end' 2>/dev/null)
 
     if [ "$is_manifest_list" = "true" ]; then
-        # log_message "DEBUG: '$full_image_name' is a manifest list. Looking for arch '$target_arch'."
-        # log_message "DEBUG: Manifest list for $full_image_name: $(echo "$manifest_json" | jq -c .)"
         platform_manifest_entry_digest=$(echo "$manifest_json" | jq -r \
             --arg OS_ARG "$(echo "$target_arch" | cut -d/ -f1)" \
             --arg ARCH_ARG "$(echo "$target_arch" | cut -d/ -f2)" \
             '.manifests[]? | select(.platform.os == $OS_ARG and .platform.architecture == $ARCH_ARG) | .digest' 2>/dev/null)
 
         if [ -n "$platform_manifest_entry_digest" ] && [ "$platform_manifest_entry_digest" != "null" ] && [ "$platform_manifest_entry_digest" != '""' ]; then
-            # log_message "DEBUG: Found platform manifest entry digest '$platform_manifest_entry_digest' for '$target_arch' in '$full_image_name'."
             local image_name_base
             if echo "$full_image_name" | grep -q '@sha256:'; then
                  image_name_base=$(echo "$full_image_name" | cut -d@ -f1)
@@ -124,32 +133,13 @@ get_arch_image_config_digest() {
             fi
             
             local specific_image_manifest_json
-            # log_message "DEBUG: Inspecting specific platform manifest: '${image_name_base}@${platform_manifest_entry_digest}'"
             specific_image_manifest_json=$(docker manifest inspect "${image_name_base}@${platform_manifest_entry_digest}" 2>/dev/null)
             
             if [ -n "$specific_image_manifest_json" ]; then
-                # log_message "DEBUG: Specific platform manifest JSON: $(echo "$specific_image_manifest_json" | jq -c .)"
                 image_config_digest_value=$(echo "$specific_image_manifest_json" | jq -r '.config.digest // ""' 2>/dev/null)
-            # else
-                # log_message "DEBUG: Failed to inspect specific platform manifest ${image_name_base}@${platform_manifest_entry_digest}"
             fi
-        # else
-            # log_message "DEBUG: No manifest entry found for arch '$target_arch' in '$full_image_name'."
-            # log_message "DEBUG: Available platforms in manifest list for '$full_image_name': $(echo "$manifest_json" | jq -c '[.manifests[]?.platform]')"
         fi
-    else # Not a manifest list, or jq failed to parse it as such. Treat as a single manifest.
-        # log_message "DEBUG: '$full_image_name' is not a manifest list (or jq failed). Assuming single manifest. JSON: $(echo "$manifest_json" | jq -c .)"
-        local manifest_os=$(echo "$manifest_json" | jq -r '.platform.os // host_os_from_config_if_available_else_empty' 2>/dev/null) # Placeholder for better extraction
-        local manifest_architecture=$(echo "$manifest_json" | jq -r '.platform.architecture // host_arch_from_config_if_available_else_empty' 2>/dev/null) # Placeholder
-        
-        # For a single manifest, we should ideally check if its platform matches target_arch.
-        # However, `docker manifest inspect <image>:<tag>` on a multi-arch tag might return a manifest for *some* platform,
-        # not necessarily the host's or the one we want without pulling.
-        # This part is complex. If the manifest JSON directly contains os/arch at the top level (as per OCI spec for image manifest), use it.
-        # If not, this function might not be able to determine the config digest for a *specific* arch from a *single* manifest
-        # unless that manifest is already for the target arch.
-        
-        # Let's assume if it's not a list, we extract .config.digest if the platform matches
+    else
         local actual_os=$(echo "$manifest_json" | jq -r '.platform.os // ""')
         local actual_arch=$(echo "$manifest_json" | jq -r '.platform.architecture // ""')
         local target_os_val=$(echo "$target_arch" | cut -d/ -f1)
@@ -157,16 +147,100 @@ get_arch_image_config_digest() {
 
         if [ "$actual_os" = "$target_os_val" ] && [ "$actual_arch" = "$target_arch_val" ]; then
             image_config_digest_value=$(echo "$manifest_json" | jq -r '.config.digest // ""' 2>/dev/null)
-        # else
-            # log_message "DEBUG: Single manifest platform '$actual_os/$actual_arch' does not match target '$target_arch'. No digest."
         fi
     fi
     
     if [ -z "$image_config_digest_value" ] || [ "$image_config_digest_value" == "null" ] || [ "$image_config_digest_value" == '""' ]; then
         image_config_digest_value="" 
     fi
-    # log_message "DEBUG: Final image_config_digest_value for '$full_image_name', '$target_arch': '$image_config_digest_value'"
     echo "$image_config_digest_value"
+}
+
+# 函数：删除远程仓库的标签/manifest (针对 registry:2 API)
+# 参数1: 完整的带标签的镜像名 (例如 your-registry/image:latest-linux-amd64)
+delete_remote_tag() {
+    local remote_image_to_delete="$1"
+    log_message "尝试删除远程标签/manifest: $remote_image_to_delete"
+
+    local registry_host_from_url
+    local image_path_and_tag
+    local image_name # 镜像在仓库中的路径，如 company/myimage
+    local tag_name   # 标签名
+    local api_url_base
+    local protocol="http" # 默认使用 http
+
+    # 从 REGISTRY_URL 提取协议和主机:端口部分
+    if echo "$REGISTRY_URL" | grep -q "://"; then
+        protocol=$(echo "$REGISTRY_URL" | cut -d: -f1)
+        registry_host_from_url=$(echo "$REGISTRY_URL" | sed -e "s|${protocol}://||")
+    else
+        registry_host_from_url="$REGISTRY_URL"
+    fi
+    api_url_base="${protocol}://${registry_host_from_url}"
+
+    # 从 remote_image_to_delete 中移除 registry 部分
+    # remote_image_to_delete 格式: ${REGISTRY_URL}/${actual_local_repo_path}:${image_tag}-${arch_suffix}
+    # 需要去掉 ${REGISTRY_URL}/ 得到 actual_local_repo_path:${image_tag}-${arch_suffix}
+    image_path_and_tag=$(echo "$remote_image_to_delete" | sed "s|^${REGISTRY_URL}/||")
+
+
+    image_name=$(echo "$image_path_and_tag" | cut -d: -f1)
+    tag_name=$(echo "$image_path_and_tag" | cut -d: -f2)
+
+    if [ -z "$image_name" ] || [ -z "$tag_name" ]; then
+        log_message "错误: 无法从 '$remote_image_to_delete' (解析为路径和标签: '$image_path_and_tag') 解析 image name 或 tag name。"
+        return 1
+    fi
+
+    log_message "获取 '$remote_image_to_delete' (仓库路径: $image_name, 标签: $tag_name) 的 manifest digest..."
+    local manifest_digest
+    local curl_auth_opts=""
+    # if [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_PASSWORD" ]; then
+    #    curl_auth_opts="-u \"$REGISTRY_USER:$REGISTRY_PASSWORD\""
+    # fi
+    
+    # 注意：sh 中直接用变量替换字符串内的引号可能行为不一致，推荐使用数组（如果用bash）或更安全的参数传递
+    # 为简单起见，如果需要认证，请直接在下面的 curl 命令中修改或使用环境变量。
+    
+    manifest_digest=$(curl -sS --head \
+        ${curl_auth_opts} \
+        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+        -H "Accept: application/vnd.docker.distribution.manifest.v1+json" \
+        "${api_url_base}/v2/${image_name}/manifests/${tag_name}" \
+        | grep -i "Docker-Content-Digest:" | awk '{print $2}' | tr -d '\r\n')
+
+    if [ -z "$manifest_digest" ]; then
+        log_message "警告: 无法获取远程镜像 '$remote_image_to_delete' (API URL: ${api_url_base}/v2/${image_name}/manifests/${tag_name}) 的 digest。可能已被删除、不存在或仓库地址/认证不正确。"
+        return 0
+    fi
+    log_message "将要删除的 manifest for '$remote_image_to_delete' 的 digest 是: $manifest_digest"
+
+    local delete_url="${api_url_base}/v2/${image_name}/manifests/${manifest_digest}"
+    log_message "发送 DELETE 请求到: $delete_url"
+    
+    local response_code
+    response_code=$(curl -sS -o /dev/null -w "%{http_code}" \
+        ${curl_auth_opts} \
+        -X DELETE \
+        "$delete_url")
+
+    if [ "$response_code" -eq 202 ]; then
+        log_message "成功: 远程 manifest '$remote_image_to_delete' (digest: $manifest_digest) 已被接受删除 (HTTP $response_code)。"
+        log_message "请记得在 Docker Registry 上运行垃圾回收 (garbage-collect) 以释放存储空间。"
+        return 0
+    elif [ "$response_code" -eq 404 ]; then
+        log_message "警告: 尝试删除的 manifest '$remote_image_to_delete' (digest: $manifest_digest) 未找到 (HTTP $response_code)。可能已被删除。"
+        return 0
+    elif [ "$response_code" -eq 405 ]; then
+        log_message "错误: 删除远程 manifest '$remote_image_to_delete' 失败 (HTTP $response_code - Method Not Allowed)。"
+        log_message "请确保 Docker Registry 启动时设置了 REGISTRY_STORAGE_DELETE_ENABLED=true。"
+        return 1
+    else
+        log_message "错误: 删除远程 manifest '$remote_image_to_delete' (digest: $manifest_digest) 失败 (HTTP $response_code)。"
+        log_message "API URL: $delete_url"
+        log_message "请检查 registry 日志、网络连接、认证（如果需要）以及 REGISTRY_STORAGE_DELETE_ENABLED 设置。"
+        return 1
+    fi
 }
 
 sync_images() {
@@ -180,8 +254,6 @@ sync_images() {
     else
         log_message "未找到自定义镜像列表文件，将使用爬虫获取镜像列表"
         log_message "执行 Python 爬虫脚本: $PYTHON_SCRIPT_PATH (MAX_PAGES_PER_CATEGORY=$MAX_PAGES_PER_CATEGORY)"
-        # Pass MAX_PAGES_PER_CATEGORY to the python script if it accepts it as an env var or arg
-        # For now, assuming it reads the env var
         if ! MAX_PAGES_PER_CATEGORY="$MAX_PAGES_PER_CATEGORY" python3 "$PYTHON_SCRIPT_PATH" > "$PYTHON_CRAWLER_LOG_FILE" 2>&1; then
             log_message "错误: Python 脚本执行失败。详情请查看 $PYTHON_CRAWLER_LOG_FILE"
             return 1
@@ -246,7 +318,7 @@ sync_images() {
             log_message "检查架构 $target_arch_loop for $hub_image_full..."
             hub_config_digest=$(get_arch_image_config_digest "$hub_image_full" "$target_arch_loop")
             if [ -z "$hub_config_digest" ]; then
-                log_message "警告: 无法获取 Docker Hub 镜像 $hub_image_full 的 $target_arch_loop Config Digest. 可能该架构不存在、访问受限或非 manifest list。跳过此架构..."
+                log_message "警告: 无法获取 Docker Hub 镜像 $hub_image_full 的 $target_arch_loop Config Digest. 跳过此架构..."
                 continue
             fi
             
@@ -287,7 +359,6 @@ sync_images() {
             log_message "标记 $hub_image_full 为 $local_image_arch_tagged"
             if ! docker tag "$hub_image_full" "$local_image_arch_tagged"; then
                 log_message "错误: 标记 $hub_image_full 为 $local_image_arch_tagged 失败。"
-                log_message "清理本地 $hub_image_full (因标记失败)"
                 docker rmi "$hub_image_full" 2>/dev/null || true 
                 continue
             fi
@@ -295,9 +366,7 @@ sync_images() {
             log_message "推送带架构的镜像 $local_image_arch_tagged 到私有仓库..."
             if ! docker push "$local_image_arch_tagged"; then
                 log_message "错误: 推送带架构的镜像 $local_image_arch_tagged 失败。"
-                log_message "清理本地标记的（但推送失败的）镜像: $local_image_arch_tagged"
                 docker rmi "$local_image_arch_tagged" 2>/dev/null || true 
-                log_message "清理本地 $hub_image_full (因 $local_image_arch_tagged 推送失败)"
                 docker rmi "$hub_image_full" 2>/dev/null || true
                 continue
             fi
@@ -306,13 +375,12 @@ sync_images() {
             echo "$local_image_arch_tagged" >> "$arch_images_for_manifest_file"
             any_arch_pushed_successfully=true
 
-            log_message "清理本地的 $hub_image_full (在成功拉取、标记并推送 $current_target_arch_sync 后)"
             docker rmi "$hub_image_full" 2>/dev/null || true
         done < "$archs_to_sync_file"
 
         if [ "$any_arch_pushed_successfully" = true ] && [ -s "$arch_images_for_manifest_file" ]; then
             log_message "准备为 $local_image_full 创建多架构 manifest..."
-            MANIFEST_IMAGES_ARGS=$(cat "$arch_images_for_manifest_file" | xargs) # xargs to put them on one line
+            MANIFEST_IMAGES_ARGS=$(cat "$arch_images_for_manifest_file" | xargs)
             log_message "使用以下已推送的架构镜像创建 manifest: $MANIFEST_IMAGES_ARGS"
 
             log_message "尝试移除已存在的旧 manifest list: $local_image_full (如果存在)"
@@ -322,27 +390,18 @@ sync_images() {
                 log_message "错误: 创建 manifest $local_image_full 失败。引用的镜像: $MANIFEST_IMAGES_ARGS"
             else
                 log_message "成功创建本地 manifest list: $local_image_full。现在开始推送..."
-                # Annotate manifest (optional but good practice)
-                # Ensure arch_images_for_manifest_file contains one image per line
-                while IFS= read -r image_in_manifest; do
-                    # Extract arch from something like .../image:tag-os-arch
-                    arch_suffix_from_tag=$(echo "$image_in_manifest" | rev | cut -d- -f1,2 | rev) # e.g., linux-amd64 or arm64 (needs care)
-                    # This extraction is fragile if tag itself contains hyphens.
-                    # A more robust way: from $current_target_arch_sync used when creating the tag
-                    # This requires storing the arch along with the tagged image name if not easily parsable.
-                    # For now, let's assume a simple os-arch suffix or just arch.
-                    # It's better to re-derive from the original $current_target_arch_sync for each image.
-                    # This part needs refinement if annotation is critical and tags are complex.
-
-                    # Simplified: We know $MANIFEST_IMAGES_ARGS are based on $local_image_full-${arch//\//-}
-                    # We'd need to iterate through TARGET_ARCHS that were actually pushed.
-                done < "$arch_images_for_manifest_file" # Placeholder for actual annotation loop
-
                 if ! docker manifest push "$local_image_full"; then
                     log_message "错误: 推送 manifest $local_image_full 失败。"
                     docker manifest rm "$local_image_full" 2>/dev/null || true 
                 else
                     log_message "成功创建并推送多架构 manifest: $local_image_full"
+                    
+                    log_message "多架构 manifest 推送成功。现在尝试删除远程的架构特定标签/manifests..."
+                    if [ -f "$arch_images_for_manifest_file" ]; then
+                        while IFS= read -r arch_image_to_delete_remote; do
+                            delete_remote_tag "$arch_image_to_delete_remote"
+                        done < "$arch_images_for_manifest_file"
+                    fi
                 fi
             fi
         elif [ "$arch_count" -gt 0 ]; then 
@@ -351,9 +410,9 @@ sync_images() {
 
         log_message "清理为 $local_image_full 创建的本地带架构后缀的镜像..."
         if [ -f "$arch_images_for_manifest_file" ]; then
-            while IFS= read -r arch_image_to_remove; do
-                log_message "移除本地镜像: $arch_image_to_remove"
-                docker rmi "$arch_image_to_remove" 2>/dev/null || true
+            while IFS= read -r arch_image_to_remove_local; do
+                log_message "移除本地镜像: $arch_image_to_remove_local"
+                docker rmi "$arch_image_to_remove_local" 2>/dev/null || true
             done < "$arch_images_for_manifest_file"
         fi
         rm -f "$archs_to_sync_file" "$arch_images_for_manifest_file"
@@ -377,11 +436,12 @@ if [ "$SYNC_ON_START" = "true" ]; then
 fi
 
 if command -v crond > /dev/null; then
-    log_message "设置 cron 任务: '$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1'"
-    echo "" > /etc/crontabs/root
-    echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" >> /etc/crontabs/root
-    log_message "启动 crond 服务..."
-    crond -f -l 8 -L "$CRON_LOG_FILE" &
+    CRONTAB_FILE="/var/spool/cron/crontabs/root" # Alpine/dcron
+    log_message "设置 cron 任务: '$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1' in $CRONTAB_FILE"
+    echo "" > "$CRONTAB_FILE"
+    echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" >> "$CRONTAB_FILE"
+    log_message "启动 crond 服务 (日志输出到 $CRON_LOG_FILE)..."
+    crond -b -S -l 8 -L "$CRON_LOG_FILE"
 else
     log_message "警告: crond 未找到，无法设置定时任务。"
 fi
