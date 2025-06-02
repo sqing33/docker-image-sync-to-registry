@@ -45,11 +45,15 @@ echo "- Python爬虫日志: $PYTHON_CRAWLER_LOG_FILE"
 
 # --- 依赖检查和设置 ---
 ensure_dependencies() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 开始检查依赖..." >> "$SYNC_LOG_FILE"
+    
     # 检查必要的环境变量和依赖
     if [ -z "$REGISTRY_URL" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 关键环境变量 REGISTRY_URL 未设置。" >> "$SYNC_LOG_FILE"
         exit 1
     fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - REGISTRY_URL 检查通过" >> "$SYNC_LOG_FILE"
+    
     if ! command -v jq > /dev/null; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 信息: jq 未安装，尝试安装..." >> "$SYNC_LOG_FILE"
         if apk add --no-cache jq > /dev/null 2>&1; then
@@ -59,31 +63,45 @@ ensure_dependencies() {
             exit 1
         fi
     fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - jq 检查通过" >> "$SYNC_LOG_FILE"
+    
     if ! command -v docker > /dev/null; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: docker CLI 未安装或不在PATH中。" >> "$SYNC_LOG_FILE"
         exit 1
     fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - docker CLI 检查通过" >> "$SYNC_LOG_FILE"
+    
     if [ ! -f "$PYTHON_SCRIPT_PATH" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: Python 爬虫脚本 '$PYTHON_SCRIPT_PATH' 未找到。" >> "$SYNC_LOG_FILE"
         exit 1
     fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Python脚本检查通过" >> "$SYNC_LOG_FILE"
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 创建必要的目录和文件..." >> "$SYNC_LOG_FILE"
     mkdir -p "$IMAGE_LIST_DIR" "$LOG_DIR"
     touch "$CRON_LOG_FILE" "$SYNC_LOG_FILE" "$PYTHON_CRAWLER_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 目录和文件创建完成" >> "$SYNC_LOG_FILE"
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 依赖检查完成" >> "$SYNC_LOG_FILE"
 }
 
 log_config() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 开始记录配置信息..." >> "$SYNC_LOG_FILE"
+    
     # 记录当前配置信息
     echo "$(date '+%Y-%m-%d %H:%M:%S') --- 初始配置信息 ---" >> "$SYNC_LOG_FILE"
     echo "Registry URL: $REGISTRY_URL" >> "$SYNC_LOG_FILE"
     echo "Cron Schedule: $CRON_SCHEDULE" >> "$SYNC_LOG_FILE"
     echo "Sync on Start: $SYNC_ON_START" >> "$SYNC_LOG_FILE"
-    echo "Target Architecture: $TARGET_ARCH (OS: $TARGET_OS, Arch: $TARGET_ARCHITECTURE)" >> "$SYNC_LOG_FILE"
+    echo "Target Architecture: $TARGET_ARCH" >> "$SYNC_LOG_FILE"
     echo "Remove 'library/' prefix for local official images: $REMOVE_LIBRARY_PREFIX_ON_LOCAL" >> "$SYNC_LOG_FILE"
     echo "Python Script: $PYTHON_SCRIPT_PATH" >> "$SYNC_LOG_FILE"
     echo "Image List Directory: $IMAGE_LIST_DIR" >> "$SYNC_LOG_FILE"
     echo "Max Pages Per Category to Crawl: $MAX_PAGES_PER_CATEGORY" >> "$SYNC_LOG_FILE"
     echo "Log Files: $CRON_LOG_FILE, $SYNC_LOG_FILE, $PYTHON_CRAWLER_LOG_FILE" >> "$SYNC_LOG_FILE"
     echo "---------------------------" >> "$SYNC_LOG_FILE"
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 配置信息记录完成" >> "$SYNC_LOG_FILE"
 }
 
 # 函数：获取指定架构的 Image Config Digest
