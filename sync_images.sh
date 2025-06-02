@@ -212,12 +212,11 @@ sync_images() {
         temp_dir=$(mktemp -d)
         trap 'rm -rf "$temp_dir"' EXIT
 
-        # 遍历所有目标架构
+        # 创建一个数组来存储需要同步的架构
+        archs_to_sync=()
+
+        # 遍历所有目标架构，检查是否需要同步
         for target_arch in $TARGET_ARCHS; do
-            # 为每个架构创建临时标签
-            temp_tag="${image_tag}-${target_arch//\//-}"
-            temp_image="${REGISTRY_URL}/${actual_local_repo_path}:${temp_tag}"
-            
             # 获取并比较镜像的 Config Digest
             hub_config_digest=$(get_arch_image_config_digest "$hub_image_full" "$target_arch")
 
@@ -234,59 +233,57 @@ sync_images() {
                 continue
             fi
 
-            log_message "开始同步 $hub_image_full ($target_arch)..."
-            
-            # 执行镜像同步的三个步骤：拉取、标记、推送
-            if ! docker pull --platform "$target_arch" "$hub_image_full"; then
-                log_message "错误: 拉取失败。"
-                continue
-            fi
-            
-            if ! docker tag "$hub_image_full" "$temp_image"; then
-                log_message "错误: 标记失败。"
-                docker rmi "$hub_image_full" 2>/dev/null || true 
-                continue
-            fi
-            
-            if ! docker push "$temp_image"; then
-                log_message "错误: 推送失败。"
-                docker rmi "$temp_image" 2>/dev/null || true 
-                docker rmi "$hub_image_full" 2>/dev/null || true  
-                continue
-            fi
-            log_message "成功同步到 $temp_image"
-            
-            # 保存临时镜像信息
-            echo "$temp_image" >> "$temp_dir/arch_images.txt"
-            
-            # 清理本地缓存
-            docker rmi "$hub_image_full" 2>/dev/null || true 
-            docker rmi "$temp_image" 2>/dev/null || true
+            # 将需要同步的架构添加到数组
+            archs_to_sync+=("$target_arch")
         done
 
-        # 如果成功同步了至少一个架构，创建多架构 manifest
-        if [ -f "$temp_dir/arch_images.txt" ]; then
-            log_message "创建多架构 manifest: $local_image_full"
-            
-            # 创建 manifest
-            if ! docker manifest create "$local_image_full" $(cat "$temp_dir/arch_images.txt"); then
-                log_message "错误: 创建 manifest 失败。"
-                continue
+        # 如果有需要同步的架构
+        if [ ${#archs_to_sync[@]} -gt 0 ]; then
+            log_message "开始同步 $hub_image_full 的 ${#archs_to_sync[@]} 个架构..."
+
+            # 先拉取和标记所有架构的镜像
+            for target_arch in "${archs_to_sync[@]}"; do
+                log_message "拉取 $hub_image_full ($target_arch)..."
+                
+                if ! docker pull --platform "$target_arch" "$hub_image_full"; then
+                    log_message "错误: 拉取失败。"
+                    continue
+                fi
+                
+                if ! docker tag "$hub_image_full" "$local_image_full"; then
+                    log_message "错误: 标记失败。"
+                    docker rmi "$hub_image_full" 2>/dev/null || true 
+                    continue
+                fi
+
+                # 保存本地镜像信息
+                echo "$local_image_full" >> "$temp_dir/arch_images.txt"
+            done
+
+            # 创建多架构 manifest
+            if [ -f "$temp_dir/arch_images.txt" ]; then
+                log_message "创建多架构 manifest: $local_image_full"
+                
+                # 创建 manifest
+                if ! docker manifest create "$local_image_full" $(cat "$temp_dir/arch_images.txt"); then
+                    log_message "错误: 创建 manifest 失败。"
+                    continue
+                fi
+                
+                # 推送 manifest
+                if ! docker manifest push "$local_image_full"; then
+                    log_message "错误: 推送 manifest 失败。"
+                    docker manifest rm "$local_image_full" 2>/dev/null || true
+                    continue
+                fi
+                
+                log_message "成功创建并推送多架构 manifest: $local_image_full"
             fi
-            
-            # 推送 manifest
-            if ! docker manifest push "$local_image_full"; then
-                log_message "错误: 推送 manifest 失败。"
-                docker manifest rm "$local_image_full" 2>/dev/null || true
-                continue
-            fi
-            
-            # 清理临时镜像
-            while read -r temp_image; do
-                docker manifest rm "$temp_image" 2>/dev/null || true
-            done < "$temp_dir/arch_images.txt"
-            
-            log_message "成功创建并推送多架构 manifest: $local_image_full"
+
+            # 最后清理所有本地缓存
+            log_message "清理本地缓存..."
+            docker rmi "$hub_image_full" 2>/dev/null || true 
+            docker rmi "$local_image_full" 2>/dev/null || true
         fi
     done
     log_message "镜像同步执行完毕"
