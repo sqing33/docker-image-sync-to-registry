@@ -37,13 +37,8 @@ RUN printf '#!/bin/sh\n\
   done\n\
   echo "Docker 守护进程已启动"\n\
   \n\
-  # 如果是手动执行同步命令，则执行同步\n\
-  if [ "$1" = "sync" ]; then\n\
-  exec /app/sync_images.sh sync\n\
-  else\n\
-  # 否则启动cron服务\n\
-  exec /app/sync_images.sh\n\
-  fi\n' > /app/entrypoint.sh && \
+  # 执行同步脚本\n\
+  exec /app/sync_images.sh\n' > /app/entrypoint.sh && \
   chmod +x /app/entrypoint.sh
 
 # 设置入口点

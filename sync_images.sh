@@ -256,27 +256,31 @@ sync_images() {
 ensure_dependencies
 log_config
 
+# 如果是手动执行同步命令
 if [ "$1" = "sync" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 手动触发同步任务..." | tee -a "$SYNC_LOG_FILE"
     sync_images
     exit 0
 fi
 
+# 如果是容器启动时的首次运行
 if [ "$SYNC_ON_START" = "true" ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - 检测到 SYNC_ON_START=true，执行启动时同步..." | tee -a "$SYNC_LOG_FILE"
     sync_images
 fi
 
+# 设置cron任务
 if command -v crond > /dev/null; then
     # 清空现有的cron配置
     echo "" > /etc/crontabs/root
     
-    # 添加新的cron任务，确保只添加一次
+    # 添加新的cron任务
     echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" >> /etc/crontabs/root
     
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 任务已设置: $(cat /etc/crontabs/root)" | tee -a "$SYNC_LOG_FILE"
     echo "$(date '+%Y-%m-%d %H:%M:%S') - 启动 cron 服务..." | tee -a "$SYNC_LOG_FILE"
     
-    # 使用-f参数在前台运行crond，并设置日志级别
+    # 启动cron服务
     crond -f -l 8 -L "$CRON_LOG_FILE" &
     
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 服务已启动。容器将通过 tail 保持运行。" | tee -a "$SYNC_LOG_FILE"
