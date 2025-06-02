@@ -212,8 +212,9 @@ sync_images() {
         temp_dir=$(mktemp -d)
         trap 'rm -rf "$temp_dir"' EXIT
 
-        # 创建一个数组来存储需要同步的架构
-        archs_to_sync=()
+        # 创建一个临时文件来存储需要同步的架构
+        archs_to_sync_file="$temp_dir/archs_to_sync.txt"
+        touch "$archs_to_sync_file"
 
         # 遍历所有目标架构，检查是否需要同步
         for target_arch in $TARGET_ARCHS; do
@@ -233,16 +234,17 @@ sync_images() {
                 continue
             fi
 
-            # 将需要同步的架构添加到数组
-            archs_to_sync+=("$target_arch")
+            # 将需要同步的架构添加到文件
+            echo "$target_arch" >> "$archs_to_sync_file"
         done
 
         # 如果有需要同步的架构
-        if [ ${#archs_to_sync[@]} -gt 0 ]; then
-            log_message "开始同步 $hub_image_full 的 ${#archs_to_sync[@]} 个架构..."
+        if [ -s "$archs_to_sync_file" ]; then
+            arch_count=$(wc -l < "$archs_to_sync_file")
+            log_message "开始同步 $hub_image_full 的 $arch_count 个架构..."
 
             # 先拉取和标记所有架构的镜像
-            for target_arch in "${archs_to_sync[@]}"; do
+            while read -r target_arch; do
                 log_message "拉取 $hub_image_full ($target_arch)..."
                 
                 if ! docker pull --platform "$target_arch" "$hub_image_full"; then
@@ -258,7 +260,7 @@ sync_images() {
 
                 # 保存本地镜像信息
                 echo "$local_image_full" >> "$temp_dir/arch_images.txt"
-            done
+            done < "$archs_to_sync_file"
 
             # 创建多架构 manifest
             if [ -f "$temp_dir/arch_images.txt" ]; then
