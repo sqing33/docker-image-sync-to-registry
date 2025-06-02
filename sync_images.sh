@@ -26,24 +26,24 @@ PYTHON_CRAWLER_LOG_FILE="${LOG_DIR}/docker_hub_crawler_output.log"  # Python脚�
 ensure_dependencies() {
     # 检查必要的环境变量和依赖
     if [ -z "$REGISTRY_URL" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 关键环境变量 REGISTRY_URL 未设置。" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 关键环境变量 REGISTRY_URL 未设置。" >> "$SYNC_LOG_FILE"
         exit 1
     fi
     if ! command -v jq > /dev/null; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 信息: jq 未安装，尝试安装..." | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 信息: jq 未安装，尝试安装..." >> "$SYNC_LOG_FILE"
         if apk add --no-cache jq > /dev/null 2>&1; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - 信息: jq 安装成功。" | tee -a "$SYNC_LOG_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - 信息: jq 安装成功。" >> "$SYNC_LOG_FILE"
         else
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: jq 安装失败。请手动安装。" | tee -a "$SYNC_LOG_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: jq 安装失败。请手动安装。" >> "$SYNC_LOG_FILE"
             exit 1
         fi
     fi
     if ! command -v docker > /dev/null; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: docker CLI 未安装或不在PATH中。" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: docker CLI 未安装或不在PATH中。" >> "$SYNC_LOG_FILE"
         exit 1
     fi
     if [ ! -f "$PYTHON_SCRIPT_PATH" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: Python 爬虫脚本 '$PYTHON_SCRIPT_PATH' 未找到。" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: Python 爬虫脚本 '$PYTHON_SCRIPT_PATH' 未找到。" >> "$SYNC_LOG_FILE"
         exit 1
     fi
     mkdir -p "$IMAGE_LIST_DIR" "$LOG_DIR"
@@ -52,17 +52,17 @@ ensure_dependencies() {
 
 log_config() {
     # 记录当前配置信息
-    echo "$(date '+%Y-%m-%d %H:%M:%S') --- 初始配置信息 ---" | tee -a "$SYNC_LOG_FILE"
-    echo "Registry URL: $REGISTRY_URL" | tee -a "$SYNC_LOG_FILE"
-    echo "Cron Schedule: $CRON_SCHEDULE" | tee -a "$SYNC_LOG_FILE"
-    echo "Sync on Start: $SYNC_ON_START" | tee -a "$SYNC_LOG_FILE"
-    echo "Target Architecture: $TARGET_ARCH (OS: $TARGET_OS, Arch: $TARGET_ARCHITECTURE)" | tee -a "$SYNC_LOG_FILE"
-    echo "Remove 'library/' prefix for local official images: $REMOVE_LIBRARY_PREFIX_ON_LOCAL" | tee -a "$SYNC_LOG_FILE"
-    echo "Python Script: $PYTHON_SCRIPT_PATH" | tee -a "$SYNC_LOG_FILE"
-    echo "Image List Directory: $IMAGE_LIST_DIR" | tee -a "$SYNC_LOG_FILE"
-    echo "Max Pages Per Category to Crawl: $MAX_PAGES_PER_CATEGORY" | tee -a "$SYNC_LOG_FILE"
-    echo "Log Files: $CRON_LOG_FILE, $SYNC_LOG_FILE, $PYTHON_CRAWLER_LOG_FILE" | tee -a "$SYNC_LOG_FILE"
-    echo "---------------------------" | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') --- 初始配置信息 ---" >> "$SYNC_LOG_FILE"
+    echo "Registry URL: $REGISTRY_URL" >> "$SYNC_LOG_FILE"
+    echo "Cron Schedule: $CRON_SCHEDULE" >> "$SYNC_LOG_FILE"
+    echo "Sync on Start: $SYNC_ON_START" >> "$SYNC_LOG_FILE"
+    echo "Target Architecture: $TARGET_ARCH (OS: $TARGET_OS, Arch: $TARGET_ARCHITECTURE)" >> "$SYNC_LOG_FILE"
+    echo "Remove 'library/' prefix for local official images: $REMOVE_LIBRARY_PREFIX_ON_LOCAL" >> "$SYNC_LOG_FILE"
+    echo "Python Script: $PYTHON_SCRIPT_PATH" >> "$SYNC_LOG_FILE"
+    echo "Image List Directory: $IMAGE_LIST_DIR" >> "$SYNC_LOG_FILE"
+    echo "Max Pages Per Category to Crawl: $MAX_PAGES_PER_CATEGORY" >> "$SYNC_LOG_FILE"
+    echo "Log Files: $CRON_LOG_FILE, $SYNC_LOG_FILE, $PYTHON_CRAWLER_LOG_FILE" >> "$SYNC_LOG_FILE"
+    echo "---------------------------" >> "$SYNC_LOG_FILE"
 }
 
 # 函数：获取指定架构的 Image Config Digest
@@ -113,42 +113,42 @@ get_arch_image_config_digest() {
 
 # 同步函数
 sync_images() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 开始执行镜像同步 ==================" | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 开始执行镜像同步 ==================" >> "$SYNC_LOG_FILE"
     
     # 确保输出目录存在
     mkdir -p "$IMAGE_LIST_DIR"
     
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - 运行Python脚本获取最新镜像列表 (最多 $MAX_PAGES_PER_CATEGORY 页/分类)..." | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 运行Python脚本获取最新镜像列表 (最多 $MAX_PAGES_PER_CATEGORY 页/分类)..." >> "$SYNC_LOG_FILE"
     
     # 切换到输出目录
     cd "$IMAGE_LIST_DIR" || {
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 无法切换到输出目录 '$IMAGE_LIST_DIR'" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 无法切换到输出目录 '$IMAGE_LIST_DIR'" >> "$SYNC_LOG_FILE"
         return 1
     }
     
-    if ! python3 "$PYTHON_SCRIPT_PATH" 2>&1 | tee -a "$PYTHON_CRAWLER_LOG_FILE" | tee -a "$SYNC_LOG_FILE"; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: Python 脚本 '$PYTHON_SCRIPT_PATH' 执行失败。" | tee -a "$SYNC_LOG_FILE"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
+    if ! python3 "$PYTHON_SCRIPT_PATH" 2>&1 >> "$PYTHON_CRAWLER_LOG_FILE" >> "$SYNC_LOG_FILE"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: Python 脚本 '$PYTHON_SCRIPT_PATH' 执行失败。" >> "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" >> "$SYNC_LOG_FILE"
         return 1
     fi
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Python脚本执行完毕。" | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Python脚本执行完毕。" >> "$SYNC_LOG_FILE"
 
     # 查找最新的镜像列表文件
     LATEST_FILE=$(ls -t "${IMAGE_LIST_DIR}/docker_images_"*.txt 2>/dev/null | head -n1)
     
     if [ -z "$LATEST_FILE" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 未找到由 Python 脚本生成的镜像列表文件。" | tee -a "$SYNC_LOG_FILE"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 未找到由 Python 脚本生成的镜像列表文件。" >> "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" >> "$SYNC_LOG_FILE"
         return 1
     fi
     
     if [ ! -f "$LATEST_FILE" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 镜像列表文件 '$LATEST_FILE' 不存在。" | tee -a "$SYNC_LOG_FILE"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 镜像列表文件 '$LATEST_FILE' 不存在。" >> "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" >> "$SYNC_LOG_FILE"
         return 1
     fi
     
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - 从文件 $LATEST_FILE 读取镜像列表..." | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 从文件 $LATEST_FILE 读取镜像列表..." >> "$SYNC_LOG_FILE"
     
     # 使用 cat 和 while read 循环，确保最后一行也能处理
     cat "$LATEST_FILE" | while IFS= read -r image_from_crawler || [ -n "$image_from_crawler" ]; do
@@ -156,9 +156,9 @@ sync_images() {
             continue
         fi
 
-        echo "" | tee -a "$SYNC_LOG_FILE"
-        echo "-------------------------------------------------" | tee -a "$SYNC_LOG_FILE"
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - 处理原始爬取名称: $image_from_crawler" | tee -a "$SYNC_LOG_FILE"
+        echo "" >> "$SYNC_LOG_FILE"
+        echo "-------------------------------------------------" >> "$SYNC_LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - 处理原始爬取名称: $image_from_crawler" >> "$SYNC_LOG_FILE"
 
         # 解析镜像名称和标签
         image_name_part=$(echo "$image_from_crawler" | cut -d: -f1)
@@ -191,65 +191,65 @@ sync_images() {
         hub_image_full="docker.io/${hub_image_name_ns}:${image_tag}"
         local_image_full="${REGISTRY_URL}/${actual_local_repo_path}:${image_tag}"
 
-        echo "  源镜像 (Docker Hub): $hub_image_full" | tee -a "$SYNC_LOG_FILE"
-        echo "  目标镜像 (本地 Registry): $local_image_full" | tee -a "$SYNC_LOG_FILE"
+        echo "  源镜像 (Docker Hub): $hub_image_full" >> "$SYNC_LOG_FILE"
+        echo "  目标镜像 (本地 Registry): $local_image_full" >> "$SYNC_LOG_FILE"
 
         # 获取并比较镜像的 Config Digest
-        echo "  获取 Docker Hub 镜像 Config Digest (平台: $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
+        echo "  获取 Docker Hub 镜像 Config Digest (平台: $TARGET_ARCH)..." >> "$SYNC_LOG_FILE"
         hub_config_digest=$(get_arch_image_config_digest "$hub_image_full")
 
         if [ -z "$hub_config_digest" ]; then
-            echo "  警告: 无法获取 Docker Hub 镜像 '$hub_image_full' 的 $TARGET_ARCH Config Digest. 跳过..." | tee -a "$SYNC_LOG_FILE"
+            echo "  警告: 无法获取 Docker Hub 镜像 '$hub_image_full' 的 $TARGET_ARCH Config Digest. 跳过..." >> "$SYNC_LOG_FILE"
             continue
         fi
-        echo "    Docker Hub ($TARGET_ARCH) Config Digest: $hub_config_digest" | tee -a "$SYNC_LOG_FILE"
+        echo "    Docker Hub ($TARGET_ARCH) Config Digest: $hub_config_digest" >> "$SYNC_LOG_FILE"
         
-        echo "  获取本地 Registry 镜像 Config Digest (平台: $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
+        echo "  获取本地 Registry 镜像 Config Digest (平台: $TARGET_ARCH)..." >> "$SYNC_LOG_FILE"
         local_config_digest=$(get_arch_image_config_digest "$local_image_full")
         
         if [ -n "$local_config_digest" ]; then
-            echo "    本地 Registry ($TARGET_ARCH) Config Digest: $local_config_digest" | tee -a "$SYNC_LOG_FILE"
+            echo "    本地 Registry ($TARGET_ARCH) Config Digest: $local_config_digest" >> "$SYNC_LOG_FILE"
         else
-            echo "    本地 Registry 中不存在镜像 '$local_image_full' ($TARGET_ARCH) 或无法获取其 Config Digest。" | tee -a "$SYNC_LOG_FILE"
+            echo "    本地 Registry 中不存在镜像 '$local_image_full' ($TARGET_ARCH) 或无法获取其 Config Digest。" >> "$SYNC_LOG_FILE"
         fi
 
         # 根据 Config Digest 决定是否需要同步
         if [ "$hub_config_digest" == "$local_config_digest" ] && [ -n "$hub_config_digest" ]; then
-            echo "  镜像 '$local_image_full' ($TARGET_ARCH) Config Digest 匹配。已是最新版本。跳过同步。" | tee -a "$SYNC_LOG_FILE"
+            echo "  镜像 '$local_image_full' ($TARGET_ARCH) Config Digest 匹配。已是最新版本。跳过同步。" >> "$SYNC_LOG_FILE"
         else
-            echo "  Config Digest ('$hub_config_digest' vs '$local_config_digest') 不匹配或本地不存在。开始同步 '$hub_image_full' (将拉取 $TARGET_ARCH)..." | tee -a "$SYNC_LOG_FILE"
+            echo "  Config Digest ('$hub_config_digest' vs '$local_config_digest') 不匹配或本地不存在。开始同步 '$hub_image_full' (将拉取 $TARGET_ARCH)..." >> "$SYNC_LOG_FILE"
             
             # 执行镜像同步的三个步骤：拉取、标记、推送
-            echo "    1. 拉取: $hub_image_full (指定平台: $TARGET_ARCH)" | tee -a "$SYNC_LOG_FILE"
+            echo "    1. 拉取: $hub_image_full (指定平台: $TARGET_ARCH)" >> "$SYNC_LOG_FILE"
             if ! docker pull --platform "$TARGET_ARCH" "$hub_image_full"; then
-                echo "    错误: 拉取 '$hub_image_full' (平台 $TARGET_ARCH) 失败。" | tee -a "$SYNC_LOG_FILE"
+                echo "    错误: 拉取 '$hub_image_full' (平台 $TARGET_ARCH) 失败。" >> "$SYNC_LOG_FILE"
                 continue
             fi
             
-            echo "    2. 标记: $hub_image_full -> $local_image_full" | tee -a "$SYNC_LOG_FILE"
+            echo "    2. 标记: $hub_image_full -> $local_image_full" >> "$SYNC_LOG_FILE"
             if ! docker tag "$hub_image_full" "$local_image_full"; then
-                echo "    错误: 标记镜像 '$hub_image_full' 为 '$local_image_full' 失败。" | tee -a "$SYNC_LOG_FILE"
+                echo "    错误: 标记镜像 '$hub_image_full' 为 '$local_image_full' 失败。" >> "$SYNC_LOG_FILE"
                 docker rmi "$hub_image_full" 2>/dev/null || true 
                 continue
             fi
             
-            echo "    3. 推送: $local_image_full" | tee -a "$SYNC_LOG_FILE"
+            echo "    3. 推送: $local_image_full" >> "$SYNC_LOG_FILE"
             if ! docker push "$local_image_full"; then
-                echo "    错误: 推送镜像 '$local_image_full' 失败。" | tee -a "$SYNC_LOG_FILE"
+                echo "    错误: 推送镜像 '$local_image_full' 失败。" >> "$SYNC_LOG_FILE"
                 docker rmi "$local_image_full" 2>/dev/null || true 
                 docker rmi "$hub_image_full" 2>/dev/null || true  
                 continue
             fi
-            echo "  成功同步到 '$local_image_full'" | tee -a "$SYNC_LOG_FILE"
+            echo "  成功同步到 '$local_image_full'" >> "$SYNC_LOG_FILE"
         fi
         
         # 清理本地缓存
-        echo "  清理原始拉取的本地缓存: $hub_image_full ..." | tee -a "$SYNC_LOG_FILE"
+        echo "  清理原始拉取的本地缓存: $hub_image_full ..." >> "$SYNC_LOG_FILE"
         docker rmi "$hub_image_full" 2>/dev/null || true 
 
     done
-    echo "-------------------------------------------------" | tee -a "$SYNC_LOG_FILE"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步执行完毕 ==================" | tee -a "$SYNC_LOG_FILE"
+    echo "-------------------------------------------------" >> "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步执行完毕 ==================" >> "$SYNC_LOG_FILE"
 }
 
 # --- 主逻辑 ---
@@ -258,14 +258,14 @@ log_config
 
 # 如果是手动执行同步命令
 if [ "$1" = "sync" ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - 手动触发同步任务..." | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 手动触发同步任务..." >> "$SYNC_LOG_FILE"
     sync_images
     exit 0
 fi
 
 # 如果是容器启动时的首次运行
 if [ "$SYNC_ON_START" = "true" ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - 检测到 SYNC_ON_START=true，执行启动时同步..." | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 检测到 SYNC_ON_START=true，执行启动时同步..." >> "$SYNC_LOG_FILE"
     sync_images
 fi
 
@@ -277,18 +277,18 @@ if command -v crond > /dev/null; then
     # 添加新的cron任务
     echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" >> /etc/crontabs/root
     
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 任务已设置: $(cat /etc/crontabs/root)" | tee -a "$SYNC_LOG_FILE"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - 启动 cron 服务..." | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 任务已设置: $(cat /etc/crontabs/root)" >> "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 启动 cron 服务..." >> "$SYNC_LOG_FILE"
     
     # 启动cron服务
     crond -f -l 8 -L "$CRON_LOG_FILE" &
     
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 服务已启动。容器将通过 tail 保持运行。" | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 服务已启动。容器将通过 tail 保持运行。" >> "$SYNC_LOG_FILE"
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - 警告: crond 未找到，无法设置定时任务。" | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 警告: crond 未找到，无法设置定时任务。" >> "$SYNC_LOG_FILE"
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - 容器正在运行，监控日志: $SYNC_LOG_FILE 和 $CRON_LOG_FILE" | tee -a "$SYNC_LOG_FILE"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - 容器正在运行，监控日志: $SYNC_LOG_FILE 和 $CRON_LOG_FILE" >> "$SYNC_LOG_FILE"
 
 # 使用tail监控日志文件
 tail -F "$SYNC_LOG_FILE" "$CRON_LOG_FILE" /dev/null
