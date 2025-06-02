@@ -31,9 +31,10 @@ class DockerHubCrawler:
         self.base_url = "https://hub.docker.com"
         self.categories = []
         self.extracted_images = {}
-        # 优先使用传入的参数，其次使用环境变量，最后使用默认值
+        # 优先使用传入的参数，其次使用环境变量MAX_PAGES_PER_CATEGORY，最后使用默认值
         self.max_pages = max_pages if max_pages is not None else int(
-            os.getenv('MAX_PAGES', 5))
+            os.getenv('MAX_PAGES_PER_CATEGORY', 5))
+        print(f"使用最大页数: {self.max_pages} (来自环境变量 MAX_PAGES_PER_CATEGORY)")
 
     def extract_json_from_html(self, html_content):
         """
@@ -434,13 +435,16 @@ class DockerHubCrawler:
 
 
 def main():
-    # 从命令行参数获取最大页数
+    # 从环境变量获取最大页数
     max_pages = None
-    if len(sys.argv) > 1:
+    if os.getenv('MAX_PAGES_PER_CATEGORY'):
         try:
-            max_pages = int(sys.argv[1])
+            max_pages = int(os.getenv('MAX_PAGES_PER_CATEGORY'))
+            print(f"从环境变量 MAX_PAGES_PER_CATEGORY 读取到最大页数: {max_pages}")
         except ValueError:
-            print(f"警告: 无效的最大页数参数 '{sys.argv[1]}'，将使用默认值")
+            print(
+                f"警告: 环境变量 MAX_PAGES_PER_CATEGORY 的值无效: '{os.getenv('MAX_PAGES_PER_CATEGORY')}'，将使用默认值"
+            )
 
     crawler = DockerHubCrawler(max_pages)
     results = crawler.crawl_categories()

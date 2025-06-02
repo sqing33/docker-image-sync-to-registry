@@ -42,7 +42,7 @@ services:
       - HTTP_PROXY=http://192.168.1.100:7890
       - HTTPS_PROXY=http://192.168.1.100:7890
       - NO_PROXY=localhost,127.0.0.1,192.168.1.100:1500,docker.1panel.live,https://docker.1ms.run
-      # 设置获取 DockerHub 镜像列表最大页数，默认为5
+      # 设置获取 DockerHub 镜像列表最大页数
       - MAX_PAGES_PER_CATEGORY=3
     volumes:
       # 挂载时间和时区配置

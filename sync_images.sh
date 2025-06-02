@@ -126,7 +126,7 @@ sync_images() {
         return 1
     }
     
-    if ! python3 "$PYTHON_SCRIPT_PATH" "$MAX_PAGES_PER_CATEGORY" 2>&1 | tee -a "$PYTHON_CRAWLER_LOG_FILE" | tee -a "$SYNC_LOG_FILE"; then
+    if ! python3 "$PYTHON_SCRIPT_PATH" 2>&1 | tee -a "$PYTHON_CRAWLER_LOG_FILE" | tee -a "$SYNC_LOG_FILE"; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: Python 脚本 '$PYTHON_SCRIPT_PATH' 执行失败。" | tee -a "$SYNC_LOG_FILE"
         echo "$(date '+%Y-%m-%d %H:%M:%S') - ================== 镜像同步异常结束 ==================" | tee -a "$SYNC_LOG_FILE"
         return 1
@@ -267,14 +267,24 @@ if [ "$SYNC_ON_START" = "true" ]; then
 fi
 
 if command -v crond > /dev/null; then
-    echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" > /etc/crontabs/root
+    # 清空现有的cron配置
+    echo "" > /etc/crontabs/root
+    
+    # 添加新的cron任务，确保只添加一次
+    echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" >> /etc/crontabs/root
+    
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 任务已设置: $(cat /etc/crontabs/root)" | tee -a "$SYNC_LOG_FILE"
     echo "$(date '+%Y-%m-%d %H:%M:%S') - 启动 cron 服务..." | tee -a "$SYNC_LOG_FILE"
-    crond -l 8 -L "$CRON_LOG_FILE" 
+    
+    # 使用-f参数在前台运行crond，并设置日志级别
+    crond -f -l 8 -L "$CRON_LOG_FILE" &
+    
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Cron 服务已启动。容器将通过 tail 保持运行。" | tee -a "$SYNC_LOG_FILE"
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') -警告: crond 未找到，无法设置定时任务。" | tee -a "$SYNC_LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - 警告: crond 未找到，无法设置定时任务。" | tee -a "$SYNC_LOG_FILE"
 fi
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') - 容器正在运行，监控日志: $SYNC_LOG_FILE 和 $CRON_LOG_FILE" | tee -a "$SYNC_LOG_FILE"
-exec tail -F "$SYNC_LOG_FILE" "$CRON_LOG_FILE" /dev/null
+
+# 使用tail监控日志文件
+tail -F "$SYNC_LOG_FILE" "$CRON_LOG_FILE" /dev/null
