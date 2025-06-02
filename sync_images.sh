@@ -258,16 +258,29 @@ sync_images() {
                     continue
                 fi
 
-                # 推送镜像到本地仓库
-                if ! docker push "$local_image_full"; then
-                    log_message "错误: 推送失败。"
+                # 推送镜像到本地仓库并捕获输出
+                PUSH_OUTPUT=$(docker push "$local_image_full" 2>&1)
+                PUSH_EXIT_CODE=$?
+
+                if [ $PUSH_EXIT_CODE -ne 0 ]; then
+                    log_message "错误: 推送失败。推送输出：$PUSH_OUTPUT"
                     docker rmi "$local_image_full" 2>/dev/null || true 
                     docker rmi "$hub_image_full" 2>/dev/null || true 
                     continue
                 fi
 
-                # 保存本地镜像信息
-                echo "$local_image_full" >> "$temp_dir/arch_images.txt"
+                # 从推送输出中提取 digest
+                ARCH_IMAGE_DIGEST=$(echo "$PUSH_OUTPUT" | grep "^latest: digest: sha256:" | awk '{print $NF}')
+
+                if [ -z "$ARCH_IMAGE_DIGEST" ]; then
+                    log_message "警告: 无法从推送输出中提取 $target_arch 镜像的 digest。推送输出：$PUSH_OUTPUT"
+                    # 继续执行，但这个架构可能不会包含在 manifest 中
+                else
+                    # 使用带有 digest 的引用保存本地镜像信息
+                    log_message "成功推送 $target_arch 镜像，digest: $ARCH_IMAGE_DIGEST"
+                    echo "${local_image_full/@*/}"@"$ARCH_IMAGE_DIGEST" >> "$temp_dir/arch_images.txt"
+                fi
+
             done < "$archs_to_sync_file"
 
             # 创建多架构 manifest
