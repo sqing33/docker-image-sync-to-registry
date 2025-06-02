@@ -24,7 +24,7 @@ IMAGE_LIST_DIR="/app/output"
 LOG_DIR="/var/log"
 MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"
 CUSTOM_IMAGES_FILE="/app/custom_images.txt"
-# 如果 registry 需要认证，可以在这里设置，然后在 delete_remote_tag 中使用
+# 如果 registry 需要认证，可以在这里设置环境变量，然后在 delete_remote_tag 中使用
 # REGISTRY_USER="${REGISTRY_USER:-}"
 # REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
 
@@ -37,7 +37,7 @@ for arch_val; do
     TARGET_ARCHS="$TARGET_ARCHS $arch_val"
 done
 IFS="$OLD_IFS"
-TARGET_ARCHS=$(echo "$TARGET_ARCHS" | xargs)
+TARGET_ARCHS=$(echo "$TARGET_ARCHS" | xargs) # Trim leading/trailing whitespace
 
 CRON_LOG_FILE="${LOG_DIR}/cron.log"
 SYNC_LOG_FILE="${LOG_DIR}/sync_images_activity.log"
@@ -139,9 +139,9 @@ get_arch_image_config_digest() {
                 image_config_digest_value=$(echo "$specific_image_manifest_json" | jq -r '.config.digest // ""' 2>/dev/null)
             fi
         fi
-    else
-        local actual_os=$(echo "$manifest_json" | jq -r '.platform.os // ""')
-        local actual_arch=$(echo "$manifest_json" | jq -r '.platform.architecture // ""')
+    else # Not a manifest list, treat as a single manifest
+        local actual_os=$(echo "$manifest_json" | jq -r '.platform.os // ""' 2>/dev/null)
+        local actual_arch=$(echo "$manifest_json" | jq -r '.platform.architecture // ""' 2>/dev/null)
         local target_os_val=$(echo "$target_arch" | cut -d/ -f1)
         local target_arch_val=$(echo "$target_arch" | cut -d/ -f2)
 
@@ -162,65 +162,72 @@ delete_remote_tag() {
     local remote_image_to_delete="$1"
     log_message "尝试删除远程标签/manifest: $remote_image_to_delete"
 
-    local registry_host_from_url
-    local image_path_and_tag
-    local image_name # 镜像在仓库中的路径，如 company/myimage
-    local tag_name   # 标签名
+    local registry_host_part_from_env # 主机名或主机:端口，从 REGISTRY_URL 解析
+    local image_name_in_repo      # 镜像在仓库中的路径，如 company/myimage
+    local tag_name_in_repo        # 标签名
     local api_url_base
-    local protocol="http" # 默认使用 http
+    local protocol # 将在此处确定
 
-    # 从 REGISTRY_URL 提取协议和主机:端口部分
+    # 从 REGISTRY_URL 确定协议和主机部分
     if echo "$REGISTRY_URL" | grep -q "://"; then
+        # REGISTRY_URL 包含协议 (例如 "https://docker.916337.xyz" 或 "http://localhost:5000")
         protocol=$(echo "$REGISTRY_URL" | cut -d: -f1)
-        registry_host_from_url=$(echo "$REGISTRY_URL" | sed -e "s|${protocol}://||")
+        registry_host_part_from_env=$(echo "$REGISTRY_URL" | sed -e "s|${protocol}://||")
     else
-        registry_host_from_url="$REGISTRY_URL"
+        # REGISTRY_URL 没有明确指定协议 (例如 "docker.916337.xyz" 或 "localhost:5000")
+        # 我们将 HTTPS 作为默认值，因为这是生产环境的常见做法，并且您已确认您的是HTTPS
+        protocol="https"
+        registry_host_part_from_env="$REGISTRY_URL"
+        log_message "REGISTRY_URL ('$REGISTRY_URL') 未指定协议，delete_remote_tag 默认为 HTTPS。"
     fi
-    api_url_base="${protocol}://${registry_host_from_url}"
+    api_url_base="${protocol}://${registry_host_part_from_env}"
 
-    # 从 remote_image_to_delete 中移除 registry 部分
-    # remote_image_to_delete 格式: ${REGISTRY_URL}/${actual_local_repo_path}:${image_tag}-${arch_suffix}
-    # 需要去掉 ${REGISTRY_URL}/ 得到 actual_local_repo_path:${image_tag}-${arch_suffix}
-    image_path_and_tag=$(echo "$remote_image_to_delete" | sed "s|^${REGISTRY_URL}/||")
+    # 从 remote_image_to_delete (格式: ${REGISTRY_URL}/${image_name_in_repo}:${tag_name_in_repo})
+    # 提取 image_name_in_repo 和 tag_name_in_repo
+    local path_after_registry_host
+    
+    # 先将 REGISTRY_URL 转义以用于 sed。这处理 REGISTRY_URL 中可能存在的特殊字符。
+    local escaped_registry_url=$(echo "$REGISTRY_URL" | sed 's|[&/]|\\&|g') # Escapes &, /
+    # remote_image_to_delete 的格式是 ${REGISTRY_URL}/path/to/image:tag-arch
+    # 我们要提取的是 path/to/image:tag-arch
+    path_after_registry_host=$(echo "$remote_image_to_delete" | sed "s|^${escaped_registry_url}/||")
+    
+    image_name_in_repo=$(echo "$path_after_registry_host" | cut -d: -f1)
+    tag_name_in_repo=$(echo "$path_after_registry_host" | cut -d: -f2-) # 使用 -f2- 以处理标签中可能存在的冒号
 
-
-    image_name=$(echo "$image_path_and_tag" | cut -d: -f1)
-    tag_name=$(echo "$image_path_and_tag" | cut -d: -f2)
-
-    if [ -z "$image_name" ] || [ -z "$tag_name" ]; then
-        log_message "错误: 无法从 '$remote_image_to_delete' (解析为路径和标签: '$image_path_and_tag') 解析 image name 或 tag name。"
+    if [ -z "$image_name_in_repo" ] || [ -z "$tag_name_in_repo" ]; then
+        log_message "错误: 无法从 '$remote_image_to_delete' (解析后的路径和标签: '$path_after_registry_host') 解析 image name 或 tag name。"
+        log_message "REGISTRY_URL: '$REGISTRY_URL', Escaped: '$escaped_registry_url'"
         return 1
     fi
 
-    log_message "获取 '$remote_image_to_delete' (仓库路径: $image_name, 标签: $tag_name) 的 manifest digest..."
+    log_message "获取 '$remote_image_to_delete' (仓库路径: $image_name_in_repo, 标签: $tag_name_in_repo) 的 manifest digest (API Base: $api_url_base)..."
     local manifest_digest
-    local curl_auth_opts=""
+    local curl_auth_opts_array=() # Bash array for curl options
+    # 如果需要认证:
     # if [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_PASSWORD" ]; then
-    #    curl_auth_opts="-u \"$REGISTRY_USER:$REGISTRY_PASSWORD\""
+    #    curl_auth_opts_array=("-u" "$REGISTRY_USER:$REGISTRY_PASSWORD")
     # fi
     
-    # 注意：sh 中直接用变量替换字符串内的引号可能行为不一致，推荐使用数组（如果用bash）或更安全的参数传递
-    # 为简单起见，如果需要认证，请直接在下面的 curl 命令中修改或使用环境变量。
-    
     manifest_digest=$(curl -sS --head \
-        ${curl_auth_opts} \
+        "${curl_auth_opts_array[@]}" \
         -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
         -H "Accept: application/vnd.docker.distribution.manifest.v1+json" \
-        "${api_url_base}/v2/${image_name}/manifests/${tag_name}" \
+        "${api_url_base}/v2/${image_name_in_repo}/manifests/${tag_name_in_repo}" \
         | grep -i "Docker-Content-Digest:" | awk '{print $2}' | tr -d '\r\n')
 
     if [ -z "$manifest_digest" ]; then
-        log_message "警告: 无法获取远程镜像 '$remote_image_to_delete' (API URL: ${api_url_base}/v2/${image_name}/manifests/${tag_name}) 的 digest。可能已被删除、不存在或仓库地址/认证不正确。"
-        return 0
+        log_message "警告: 无法获取远程镜像 '$remote_image_to_delete' (API URL: ${api_url_base}/v2/${image_name_in_repo}/manifests/${tag_name_in_repo}) 的 digest。可能已被删除、不存在或仓库地址/认证不正确。"
+        return 0 
     fi
     log_message "将要删除的 manifest for '$remote_image_to_delete' 的 digest 是: $manifest_digest"
 
-    local delete_url="${api_url_base}/v2/${image_name}/manifests/${manifest_digest}"
+    local delete_url="${api_url_base}/v2/${image_name_in_repo}/manifests/${manifest_digest}"
     log_message "发送 DELETE 请求到: $delete_url"
     
     local response_code
     response_code=$(curl -sS -o /dev/null -w "%{http_code}" \
-        ${curl_auth_opts} \
+        "${curl_auth_opts_array[@]}" \
         -X DELETE \
         "$delete_url")
 
@@ -269,7 +276,6 @@ sync_images() {
     
     local current_temp_dir
     current_temp_dir=$(mktemp -d)
-    # shellcheck disable=SC2064
     trap 'log_message "清理临时目录: $current_temp_dir"; rm -rf "$current_temp_dir"; trap - EXIT INT TERM' EXIT INT TERM
 
     cat "$LATEST_FILE" | while IFS= read -r image_from_crawler || [ -n "$image_from_crawler" ]; do
@@ -304,12 +310,16 @@ sync_images() {
             actual_local_repo_path="$hub_image_name_ns"
         fi
         
+        # hub_image_full is the source image from Docker Hub
         local hub_image_full="docker.io/${hub_image_name_ns}:${image_tag}"
+        # local_image_full is the target multi-arch manifest tag in your private registry
         local local_image_full="${REGISTRY_URL}/${actual_local_repo_path}:${image_tag}"
 
         log_message "处理镜像: $hub_image_full -> $local_image_full"
 
         local archs_to_sync_file="$current_temp_dir/archs_to_sync_${image_name_part//\//_}_${image_tag}.txt"
+        # This file will store the full names of arch-specific images as pushed to your registry
+        # e.g., https://docker.916337.xyz/amazon/aws-xray-daemon:latest-linux-amd64
         local arch_images_for_manifest_file="$current_temp_dir/arch_images_for_manifest_${image_name_part//\//_}_${image_tag}.txt"
         >"$archs_to_sync_file"; >"$arch_images_for_manifest_file"
 
@@ -322,7 +332,7 @@ sync_images() {
                 continue
             fi
             
-            local_config_digest=$(get_arch_image_config_digest "$local_image_full" "$target_arch_loop")
+            local_config_digest=$(get_arch_image_config_digest "$local_image_full" "$target_arch_loop") # Check against the multi-arch tag
             if [ "$hub_config_digest" == "$local_config_digest" ]; then
                 log_message "本地镜像 $local_image_full ($target_arch_loop) 与 Docker Hub 版本 (Digest: $hub_config_digest) 一致。跳过同步此架构。"
             else
@@ -354,7 +364,9 @@ sync_images() {
                 continue
             fi
             
-            local local_image_arch_tagged="${local_image_full}-${current_target_arch_sync//\//-}"
+            # This is the arch-specific tag that will be pushed first, then deleted from the remote registry
+            # It uses $local_image_full as a base, which already includes $REGISTRY_URL
+            local local_image_arch_tagged="${local_image_full}-${current_target_arch_sync//\//-}" 
             
             log_message "标记 $hub_image_full 为 $local_image_arch_tagged"
             if ! docker tag "$hub_image_full" "$local_image_arch_tagged"; then
@@ -372,14 +384,17 @@ sync_images() {
             fi
             
             log_message "成功推送 $local_image_arch_tagged. 将其添加到 manifest 创建列表。"
-            echo "$local_image_arch_tagged" >> "$arch_images_for_manifest_file"
+            # Store the full name as pushed, this is what delete_remote_tag will receive
+            echo "$local_image_arch_tagged" >> "$arch_images_for_manifest_file" 
             any_arch_pushed_successfully=true
 
-            docker rmi "$hub_image_full" 2>/dev/null || true
+            docker rmi "$hub_image_full" 2>/dev/null || true # Clean up the original platform-specific pulled image
         done < "$archs_to_sync_file"
 
         if [ "$any_arch_pushed_successfully" = true ] && [ -s "$arch_images_for_manifest_file" ]; then
             log_message "准备为 $local_image_full 创建多架构 manifest..."
+            # MANIFEST_IMAGES_ARGS will be like:
+            # https://docker.916337.xyz/amazon/aws-xray-daemon:latest-linux-amd64 https://docker.916337.xyz/amazon/aws-xray-daemon:latest-linux-arm64
             MANIFEST_IMAGES_ARGS=$(cat "$arch_images_for_manifest_file" | xargs)
             log_message "使用以下已推送的架构镜像创建 manifest: $MANIFEST_IMAGES_ARGS"
 
@@ -399,6 +414,8 @@ sync_images() {
                     log_message "多架构 manifest 推送成功。现在尝试删除远程的架构特定标签/manifests..."
                     if [ -f "$arch_images_for_manifest_file" ]; then
                         while IFS= read -r arch_image_to_delete_remote; do
+                            # arch_image_to_delete_remote is the $local_image_arch_tagged value
+                            # e.g., https://docker.916337.xyz/amazon/aws-xray-daemon:latest-linux-amd64
                             delete_remote_tag "$arch_image_to_delete_remote"
                         done < "$arch_images_for_manifest_file"
                     fi
@@ -411,6 +428,7 @@ sync_images() {
         log_message "清理为 $local_image_full 创建的本地带架构后缀的镜像..."
         if [ -f "$arch_images_for_manifest_file" ]; then
             while IFS= read -r arch_image_to_remove_local; do
+                # arch_image_to_remove_local is also the $local_image_arch_tagged value
                 log_message "移除本地镜像: $arch_image_to_remove_local"
                 docker rmi "$arch_image_to_remove_local" 2>/dev/null || true
             done < "$arch_images_for_manifest_file"
@@ -438,10 +456,11 @@ fi
 if command -v crond > /dev/null; then
     CRONTAB_FILE="/var/spool/cron/crontabs/root" # Alpine/dcron
     log_message "设置 cron 任务: '$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1' in $CRONTAB_FILE"
-    echo "" > "$CRONTAB_FILE"
+    touch "$CRONTAB_FILE" # Ensure file exists for redirection
+    echo "" > "$CRONTAB_FILE" # Clear existing crontab for root
     echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" >> "$CRONTAB_FILE"
     log_message "启动 crond 服务 (日志输出到 $CRON_LOG_FILE)..."
-    crond -b -S -l 8 -L "$CRON_LOG_FILE"
+    crond -b -S -l 8 -L "$CRON_LOG_FILE" # Start in background, log to file
 else
     log_message "警告: crond 未找到，无法设置定时任务。"
 fi
