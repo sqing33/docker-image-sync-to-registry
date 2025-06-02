@@ -38,18 +38,18 @@
 ```yaml
 services:
   image-sync:
-    image: docker.916337.xyz/sqing33/docker_image_async_to_registry:latest
+    image: sqing33/docker_image_async_to_registry
     container_name: docker_image_async_to_registry
     network_mode: host
     privileged: true
     environment:
-      - REGISTRY_URL=docker.916337.xyz
+      - REGISTRY_URL=[私有仓库地址REGISTRY_URL]
       - CRON_SCHEDULE=0 0 * * *  # 每天0点执行
       - SYNC_ON_START=true  # 是否在启动时执行同步
       - TARGET_ARCH=linux/amd64  # 目标架构
       - HTTP_PROXY=http://192.168.1.100:7890
       - HTTPS_PROXY=http://192.168.1.100:7890
-      - NO_PROXY=localhost,127.0.0.1,docker.916337.xyz,docker.1panel.live
+      - NO_PROXY=localhost,127.0.0.1,docker.1panel.live,[私有仓库地址REGISTRY_URL]
       - MAX_PAGES=3  # 设置获取 DockerHub 镜像列表最大页数，默认为5
     volumes:
       - /vol1/1000/Docker/docker_image_async_to_registry/daemon.json:/etc/docker/daemon.json
