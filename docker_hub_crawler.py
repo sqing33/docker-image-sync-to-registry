@@ -352,7 +352,7 @@ class DockerHubCrawler:
         """
         if not filename:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"output/docker_images_{timestamp}.txt"
+            filename = f"/app/output/docker_images_{timestamp}.txt"
 
         # 确保输出目录存在
         os.makedirs(os.path.dirname(filename), exist_ok=True)

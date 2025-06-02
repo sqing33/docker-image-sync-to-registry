@@ -134,7 +134,7 @@ sync_images() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Python脚本执行完毕。" >> "$SYNC_LOG_FILE"
 
     # 查找最新的镜像列表文件
-    LATEST_FILE=$(ls -t "${IMAGE_LIST_DIR}/docker_images_"*.txt 2>/dev/null | head -n1)
+    LATEST_FILE=$(ls -t "/app/output/docker_images_"*.txt 2>/dev/null | head -n1)
     
     if [ -z "$LATEST_FILE" ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') - 错误: 未找到由 Python 脚本生成的镜像列表文件。" >> "$SYNC_LOG_FILE"
