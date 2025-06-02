@@ -17,7 +17,7 @@ MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"  # 控制Python脚本爬�
 
 # --- 辅助变量 ---
 # 将TARGET_ARCH分割成数组
-IFS=',' read -ra TARGET_ARCHS <<< "$TARGET_ARCH"
+TARGET_ARCHS=(${TARGET_ARCH//,/ })
 CRON_LOG_FILE="${LOG_DIR}/cron.log"  # cron任务日志
 SYNC_LOG_FILE="${LOG_DIR}/sync_images_activity.log"  # 主同步日志
 PYTHON_CRAWLER_LOG_FILE="${LOG_DIR}/docker_hub_crawler_output.log"  # Python脚本的输出日志
