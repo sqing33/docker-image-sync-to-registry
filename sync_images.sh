@@ -2,8 +2,8 @@
 
 # sync_images.sh
 # 这个脚本用于同步 Docker Hub 镜像到本地私有仓库
-# 它会定期从 Docker Hub 拉取镜像并推送到本地仓库，
-# 然后尝试删除用于构建多架构 manifest 的架构特定标签。
+# 它会定期从 Docker Hub 拉取镜像并推送到本地仓库。
+# 架构特定的标签 (如 image:tag-linux-amd64) 将保留在私有仓库中。
 
 # 添加日志函数
 log_message() {
@@ -46,8 +46,6 @@ IMAGE_LIST_DIR="/app/output"
 LOG_DIR="/var/log"
 MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"
 CUSTOM_IMAGES_FILE="/app/custom_images.txt"
-REGISTRY_USER="${REGISTRY_USER:-}"
-REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
 
 # --- 辅助变量 ---
 OLD_IFS="$IFS"
@@ -185,96 +183,6 @@ get_arch_image_config_digest() {
         image_config_digest_value="" 
     fi
     echo "$image_config_digest_value"
-}
-
-# 函数：删除远程仓库的标签/manifest (针对 registry:2 API)
-# 参数1: 完整的带标签的镜像名 (例如 your-registry.com/image:latest-linux-amd64)
-delete_remote_tag() {
-    local remote_image_to_delete="$1" # 格式: DOCKER_REGISTRY_HOST_FOR_CLI/image_name:tag
-    log_message "INFO" "尝试删除远程标签/manifest: $remote_image_to_delete"
-
-    local registry_api_host_part # 从 REGISTRY_URL 解析出的主机名或主机:端口，用于API调用
-    local image_name_in_repo      # 镜像在仓库中的路径，例如 company/myimage
-    local tag_name_in_repo        # 标签名
-    local api_url_base            # API 基础 URL
-    local protocol                # 协议 (http/https)
-
-    # 根据 REGISTRY_URL 确定协议和主机部分 (用于API调用)
-    if echo "$REGISTRY_URL" | grep -q "://"; then
-        protocol=$(echo "$REGISTRY_URL" | cut -d: -f1)
-        registry_api_host_part=$(echo "$REGISTRY_URL" | sed -e "s|${protocol}://||" -e 's|/.*$||')
-    else
-        protocol="http" # 默认协议更改为 http
-        registry_api_host_part=$(echo "$REGISTRY_URL" | sed -e 's|/.*$||')
-        log_message "WARN" "REGISTRY_URL ('$REGISTRY_URL') 未指定协议，API 调用默认为 HTTP。"
-    fi
-    api_url_base="${protocol}://${registry_api_host_part}"
-
-
-    # 从 remote_image_to_delete (格式: DOCKER_REGISTRY_HOST_FOR_CLI/image:tag) 中提取 image_name_in_repo 和 tag_name_in_repo
-    local path_after_docker_cli_host
-    
-    # 转义 DOCKER_REGISTRY_HOST_FOR_CLI 中的特殊字符
-    local escaped_docker_registry_host_for_cli=$(echo "$DOCKER_REGISTRY_HOST_FOR_CLI" | sed 's|[&/]|\\&|g')
-    # 提取注册表路径后的部分 (例如 path/to/image:tag-arch)
-    path_after_docker_cli_host=$(echo "$remote_image_to_delete" | sed "s|^${escaped_docker_registry_host_for_cli}/||")
-    
-    image_name_in_repo=$(echo "$path_after_docker_cli_host" | cut -d: -f1)
-    tag_name_in_repo=$(echo "$path_after_docker_cli_host" | cut -d: -f2-) # 处理标签中可能存在的冒号
-
-    if [ -z "$image_name_in_repo" ] || [ -z "$tag_name_in_repo" ]; then
-        log_message "ERROR" "无法从 '$remote_image_to_delete' (基于 '$DOCKER_REGISTRY_HOST_FOR_CLI') 解析镜像名或标签名。"
-        return 1
-    fi
-
-    log_message "INFO" "获取 '$remote_image_to_delete' (仓库路径 '$image_name_in_repo', 标签 '$tag_name_in_repo') 的 manifest digest..."
-    local manifest_digest
-    local curl_auth_opts_array=() 
-    if [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_PASSWORD" ]; then
-       curl_auth_opts_array=("-u" "$REGISTRY_USER:$REGISTRY_PASSWORD")
-       log_message "INFO" "检测到 REGISTRY_USER 和 REGISTRY_PASSWORD，将使用认证进行 API 操作。"
-    else
-       log_message "INFO" "未设置 REGISTRY_USER 或 REGISTRY_PASSWORD，将不使用认证进行 API 操作。"
-    fi
-    
-    manifest_digest=$(curl -sS --head \
-        "${curl_auth_opts_array[@]}" \
-        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-        -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-        -H "Accept: application/vnd.oci.image.index.v1+json" \
-        -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-        "${api_url_base}/v2/${image_name_in_repo}/manifests/${tag_name_in_repo}" \
-        | grep -i "Docker-Content-Digest:" | awk '{print $2}' | tr -d '\r\n')
-
-    if [ -z "$manifest_digest" ]; then
-        log_message "WARN" "无法获取远程镜像 '$remote_image_to_delete' (API URL: ${api_url_base}/v2/${image_name_in_repo}/manifests/${tag_name_in_repo}) 的 digest。可能已被删除或不存在。"
-        return 0
-    fi
-    log_message "INFO" "准备删除远程标签 '$tag_name_in_repo' (其指向的 manifest digest 为: $manifest_digest) for image '$image_name_in_repo'"
-
-    local delete_url="${api_url_base}/v2/${image_name_in_repo}/manifests/${tag_name_in_repo}"
-    log_message "INFO" "发送 DELETE 请求以删除标签: $delete_url"
-    
-    local response_code
-    response_code=$(curl -sS -o /dev/null -w "%{http_code}" \
-        "${curl_auth_opts_array[@]}" \
-        -X DELETE \
-        "$delete_url")
-
-    if [ "$response_code" -eq 202 ]; then
-        log_message "INFO" "✅ 成功删除远程 manifest '$remote_image_to_delete' (HTTP $response_code)。"
-        log_message "INFO" "💡 请记得运行垃圾回收以释放存储空间。"
-        return 0
-    elif [ "$response_code" -eq 404 ]; then
-        log_message "WARN" "尝试删除的 manifest '$remote_image_to_delete' 未找到 (HTTP $response_code)。可能已被删除。"
-        return 0
-    elif [ "$response_code" -eq 405 ]; then
-        log_message "ERROR" "删除远程 manifest '$remote_image_to_delete' 失败 (HTTP $response_code - Method Not Allowed)。请确保 REGISTRY_STORAGE_DELETE_ENABLED=true。"
-        return 1
-    else
-        log_message "ERROR" "删除远程 manifest '$remote_image_to_delete' 失败 (HTTP $response_code)。URL: $delete_url"
-        return 1
-    fi
 }
 
 sync_images() {
@@ -451,14 +359,6 @@ sync_images() {
                     docker manifest rm "$local_image_full" 2>/dev/null || true
                 else
                     log_message "INFO" "🎉 成功创建并推送多架构 manifest: $local_image_full"
-                    
-                    log_message "INFO" "多架构 manifest 推送成功。尝试删除远程架构特定标签/manifests..."
-                    if [ -f "$arch_images_for_manifest_file" ]; then
-                        while IFS= read -r arch_image_to_delete_remote; do
-                            # arch_image_to_delete_remote 是 DOCKER_REGISTRY_HOST_FOR_CLI/... 格式
-                            delete_remote_tag "$arch_image_to_delete_remote"
-                        done < "$arch_images_for_manifest_file"
-                    fi
                 fi
             fi
         elif [ "$arch_count" -gt 0 ]; then 

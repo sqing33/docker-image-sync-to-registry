@@ -36,8 +36,6 @@ services:
       - TARGET_ARCH=linux/amd64,linux/arm64 # 目标架构
       - REMOVE_LIBRARY_PREFIX_ON_LOCAL=true # 是否移除本地镜像的library/前缀
       - MAX_PAGES_PER_CATEGORY=1 # 控制 Python 脚本爬取的页数
-      # - REGISTRY_USER=your_username # 如果私有仓库需要认证，请取消注释并填写用户名
-      # - REGISTRY_PASSWORD=your_password # 如果私有仓库需要认证，请取消注释并填写密码
     volumes:
       - ./custom_images.txt:/app/custom_images.txt:ro # 挂载自定义镜像列表文件（可选）
     restart: unless-stopped
