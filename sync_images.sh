@@ -243,7 +243,7 @@ sync_images() {
             arch_count=$(wc -l < "$archs_to_sync_file")
             log_message "开始同步 $hub_image_full 的 $arch_count 个架构..."
 
-            # 先拉取、标记和推送所有架构的镜像
+            # 先拉取和标记所有架构的镜像
             while read -r target_arch; do
                 log_message "拉取 $hub_image_full ($target_arch)..."
                 
@@ -252,35 +252,16 @@ sync_images() {
                     continue
                 fi
                 
-                if ! docker tag "$hub_image_full" "$local_image_full"; then
+                # 为每个架构创建一个带有特定后缀的本地标记
+                local_image_arch_tagged="${local_image_full}-${target_arch//\//-}" # 替换 / 为 -
+                if ! docker tag "$hub_image_full" "$local_image_arch_tagged"; then
                     log_message "错误: 标记失败。"
-                    docker rmi "$hub_image_full" 2>/dev/null || true 
+                    docker rmi "$hub_image_full" 2>/dev/null || true
                     continue
                 fi
-
-                # 推送镜像到本地仓库并捕获输出
-                PUSH_OUTPUT=$(docker push "$local_image_full" 2>&1)
-                PUSH_EXIT_CODE=$?
-
-                if [ $PUSH_EXIT_CODE -ne 0 ]; then
-                    log_message "错误: 推送失败。推送输出：$PUSH_OUTPUT"
-                    docker rmi "$local_image_full" 2>/dev/null || true 
-                    docker rmi "$hub_image_full" 2>/dev/null || true 
-                    continue
-                fi
-
-                # 从推送输出中提取 digest
-                ARCH_IMAGE_DIGEST=$(echo "$PUSH_OUTPUT" | grep "^latest: digest: sha256:" | awk '{print $NF}')
-
-                if [ -z "$ARCH_IMAGE_DIGEST" ]; then
-                    log_message "警告: 无法从推送输出中提取 $target_arch 镜像的 digest。推送输出：$PUSH_OUTPUT"
-                    # 继续执行，但这个架构可能不会包含在 manifest 中
-                else
-                    # 使用带有 digest 的引用保存本地镜像信息
-                    log_message "成功推送 $target_arch 镜像，digest: $ARCH_IMAGE_DIGEST"
-                    echo "${local_image_full/@*/}"@"$ARCH_IMAGE_DIGEST" >> "$temp_dir/arch_images.txt"
-                fi
-
+ 
+                # 保存本地镜像信息
+                echo "$local_image_arch_tagged" >> "$temp_dir/arch_images.txt"
             done < "$archs_to_sync_file"
 
             # 创建多架构 manifest
@@ -305,8 +286,11 @@ sync_images() {
 
             # 最后清理所有本地缓存
             log_message "清理本地缓存..."
-            docker rmi "$hub_image_full" 2>/dev/null || true 
-            docker rmi "$local_image_full" 2>/dev/null || true
+            docker rmi "$hub_image_full" 2>/dev/null || true
+            # 清理所有带有架构后缀的本地镜像
+            while read -r arch_image_to_remove; do
+                docker rmi "$arch_image_to_remove" 2>/dev/null || true
+            done < "$temp_dir/arch_images.txt"
         fi
     done
     log_message "镜像同步执行完毕"
