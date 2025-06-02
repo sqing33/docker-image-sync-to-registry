@@ -38,8 +38,8 @@
 ```yaml
 services:
   image-sync:
-    image: sqing33/docker_image_async_to_registry
-    container_name: docker_image_async_to_registry
+    image: sqing33/docker_image_sync_to_registry
+    container_name: docker_image_sync_to_registry
     network_mode: host
     privileged: true
     environment:
@@ -52,7 +52,7 @@ services:
       - NO_PROXY=localhost,127.0.0.1,docker.1panel.live,[私有仓库地址REGISTRY_URL]
       - MAX_PAGES=3  # 设置获取 DockerHub 镜像列表最大页数，默认为5
     volumes:
-      - /vol1/1000/Docker/docker_image_async_to_registry/daemon.json:/etc/docker/daemon.json
+      - /vol1/1000/Docker/docker_image_sync_to_registry/daemon.json:/etc/docker/daemon.json
     restart: always
 ```
 
@@ -97,5 +97,5 @@ services:
 
 2. 查看容器日志：
 ```bash
-docker logs docker_image_async_to_registry
+docker logs docker_image_sync_to_registry
 ```
