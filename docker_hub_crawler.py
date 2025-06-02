@@ -437,13 +437,14 @@ class DockerHubCrawler:
 def main():
     # 从环境变量获取最大页数
     max_pages = None
-    if os.getenv('MAX_PAGES_PER_CATEGORY'):
+    max_pages_env = os.getenv('MAX_PAGES_PER_CATEGORY')
+    if max_pages_env:
         try:
-            max_pages = int(os.getenv('MAX_PAGES_PER_CATEGORY'))
+            max_pages = int(max_pages_env)
             print(f"从环境变量 MAX_PAGES_PER_CATEGORY 读取到最大页数: {max_pages}")
         except ValueError:
             print(
-                f"警告: 环境变量 MAX_PAGES_PER_CATEGORY 的值无效: '{os.getenv('MAX_PAGES_PER_CATEGORY')}'，将使用默认值"
+                f"警告: 环境变量 MAX_PAGES_PER_CATEGORY 的值无效: '{max_pages_env}'，将使用默认值"
             )
 
     crawler = DockerHubCrawler(max_pages)
