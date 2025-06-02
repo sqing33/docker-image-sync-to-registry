@@ -12,11 +12,12 @@
 - 支持启动时立即同步选项
 - 支持自定义目标 Registry
 
-## 系统要求
+## 项目地址
 
-- Docker
-- Docker Compose
-- 足够的磁盘空间用于存储镜像
+- Github：[https://github.com/sqing33/docker_image_sync_to_registry](https://github.com/sqing33/docker_image_sync_to_registry)
+- DockerHub：[https://hub.docker.com/r/sqing33/docker-image-sync-to-registry](https://hub.docker.com/r/sqing33/docker-image-sync-to-registry)
+- CSDN：
+- Bilibili：
 
 ## 配置说明
 
@@ -38,7 +39,7 @@
 ```yaml
 services:
   image-sync:
-    image: sqing33/docker-image-sync-to-registry
+    image: sqing33/docker-image-sync-to-registry  # ghcr.io/sqing33/docker-image-sync-to-registry
     container_name: docker-image-sync-to-registry
     network_mode: host
     privileged: true
