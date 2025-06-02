@@ -17,7 +17,14 @@ MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"  # 控制Python脚本爬�
 
 # --- 辅助变量 ---
 # 将TARGET_ARCH分割成数组
-TARGET_ARCHS=(${TARGET_ARCH//,/ })
+OLD_IFS="$IFS"
+IFS=","
+set -- $TARGET_ARCH
+TARGET_ARCHS=""
+for arch; do
+    TARGET_ARCHS="$TARGET_ARCHS $arch"
+done
+IFS="$OLD_IFS"
 CRON_LOG_FILE="${LOG_DIR}/cron.log"  # cron任务日志
 SYNC_LOG_FILE="${LOG_DIR}/sync_images_activity.log"  # 主同步日志
 PYTHON_CRAWLER_LOG_FILE="${LOG_DIR}/docker_hub_crawler_output.log"  # Python脚本的输出日志
@@ -198,7 +205,7 @@ sync_images() {
         echo "  目标镜像 (本地 Registry): $local_image_full" >> "$SYNC_LOG_FILE"
 
         # 遍历所有目标架构
-        for target_arch in "${TARGET_ARCHS[@]}"; do
+        for target_arch in $TARGET_ARCHS; do
             echo "  处理架构: $target_arch" >> "$SYNC_LOG_FILE"
             
             # 获取并比较镜像的 Config Digest
