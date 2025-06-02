@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 services:
   registry:
@@ -28,22 +28,22 @@ services:
   docker-image-sync:
     build: .
     container_name: docker-image-sync-to-registry
-    privileged: true  # 需要特权模式来运行Docker
+    privileged: true # 需要特权模式来运行Docker
     environment:
-      - REGISTRY_URL=http://registry:5000  # 本地私有仓库的URL
-      - CRON_SCHEDULE=0 4 * * *  # 每天凌晨4点执行
-      - SYNC_ON_START=true  # 容器启动时立即同步
-      - TARGET_ARCH=linux/amd64,linux/arm64  # 目标架构
-      - REMOVE_LIBRARY_PREFIX_ON_LOCAL=true  # 是否移除本地镜像的library/前缀
-      - MAX_PAGES_PER_CATEGORY=1  # 控制Python脚本爬取的页数
+      - REGISTRY_URL=http://registry:5000 # 本地私有仓库的URL
+      - CRON_SCHEDULE=0 4 * * * # 每天凌晨4点执行
+      - SYNC_ON_START=true # 容器启动时立即同步
+      - TARGET_ARCH=linux/amd64,linux/arm64 # 目标架构
+      - REMOVE_LIBRARY_PREFIX_ON_LOCAL=true # 是否移除本地镜像的library/前缀
+      - MAX_PAGES_PER_CATEGORY=1 # 控制 Python 脚本爬取的页数
+      # - REGISTRY_USER=your_username # 如果私有仓库需要认证，请取消注释并填写用户名
+      # - REGISTRY_PASSWORD=your_password # 如果私有仓库需要认证，请取消注释并填写密码
     volumes:
-      - ./custom_images.txt:/app/custom_images.txt:ro  # 挂载自定义镜像列表文件（可选）
+      - ./custom_images.txt:/app/custom_images.txt:ro # 挂载自定义镜像列表文件（可选）
     restart: unless-stopped
     networks:
       - registry
 
-
 networks:
   registry:
     name: registry
-
