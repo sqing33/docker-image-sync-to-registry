@@ -269,7 +269,13 @@ sync_images() {
                 log_message "创建多架构 manifest: $local_image_full"
                 
                 # 创建 manifest
-                if ! docker manifest create "$local_image_full" $(cat "$temp_dir/arch_images.txt"); then
+                # 收集所有带有架构后缀的本地镜像名称，用于创建 manifest
+                MANIFEST_IMAGES=""
+                while read -r arch_image; do
+                    MANIFEST_IMAGES="$MANIFEST_IMAGES $arch_image"
+                done < "$temp_dir/arch_images.txt"
+
+                if ! docker manifest create "$local_image_full" $MANIFEST_IMAGES; then
                     log_message "错误: 创建 manifest 失败。"
                     continue
                 fi
