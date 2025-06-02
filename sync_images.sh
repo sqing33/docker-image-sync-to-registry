@@ -250,10 +250,10 @@ delete_remote_tag() {
         log_message "WARN" "无法获取远程镜像 '$remote_image_to_delete' (API URL: ${api_url_base}/v2/${image_name_in_repo}/manifests/${tag_name_in_repo}) 的 digest。可能已被删除或不存在。"
         return 0
     fi
-    log_message "INFO" "将要删除的 manifest digest: $manifest_digest"
+    log_message "INFO" "准备删除远程标签 '$tag_name_in_repo' (其指向的 manifest digest 为: $manifest_digest) for image '$image_name_in_repo'"
 
-    local delete_url="${api_url_base}/v2/${image_name_in_repo}/manifests/${manifest_digest}"
-    log_message "INFO" "发送 DELETE 请求到: $delete_url"
+    local delete_url="${api_url_base}/v2/${image_name_in_repo}/manifests/${tag_name_in_repo}"
+    log_message "INFO" "发送 DELETE 请求以删除标签: $delete_url"
     
     local response_code
     response_code=$(curl -sS -o /dev/null -w "%{http_code}" \
