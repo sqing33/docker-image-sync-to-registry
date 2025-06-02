@@ -243,7 +243,7 @@ sync_images() {
             arch_count=$(wc -l < "$archs_to_sync_file")
             log_message "开始同步 $hub_image_full 的 $arch_count 个架构..."
 
-            # 先拉取和标记所有架构的镜像
+            # 先拉取、标记和推送所有架构的镜像
             while read -r target_arch; do
                 log_message "拉取 $hub_image_full ($target_arch)..."
                 
@@ -254,6 +254,14 @@ sync_images() {
                 
                 if ! docker tag "$hub_image_full" "$local_image_full"; then
                     log_message "错误: 标记失败。"
+                    docker rmi "$hub_image_full" 2>/dev/null || true 
+                    continue
+                fi
+
+                # 推送镜像到本地仓库
+                if ! docker push "$local_image_full"; then
+                    log_message "错误: 推送失败。"
+                    docker rmi "$local_image_full" 2>/dev/null || true 
                     docker rmi "$hub_image_full" 2>/dev/null || true 
                     continue
                 fi
