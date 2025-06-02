@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # sync_images.sh
 # 这个脚本用于同步 Docker Hub 镜像到本地私有仓库
