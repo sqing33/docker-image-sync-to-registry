@@ -4,6 +4,8 @@
 # 这个脚本用于同步 Docker Hub 镜像到本地私有仓库
 # 它会定期从 Docker Hub 拉取镜像并推送到本地仓库
 
+echo "同步脚本开始执行..."
+
 # --- 配置部分 ---
 REGISTRY_URL="${REGISTRY_URL}"  # 本地私有仓库的URL
 CRON_SCHEDULE="${CRON_SCHEDULE:-0 4 * * *}"  # 默认每天凌晨4点执行
@@ -14,6 +16,12 @@ PYTHON_SCRIPT_PATH="/app/docker_hub_crawler.py"  # Python爬虫脚本路径
 IMAGE_LIST_DIR="/app/output"  # 镜像列表输出目录
 LOG_DIR="/var/log"  # 日志目录
 MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"  # 控制Python脚本爬取的页数
+
+echo "当前配置:"
+echo "REGISTRY_URL: $REGISTRY_URL"
+echo "TARGET_ARCH: $TARGET_ARCH"
+echo "SYNC_ON_START: $SYNC_ON_START"
+echo "MAX_PAGES_PER_CATEGORY: $MAX_PAGES_PER_CATEGORY"
 
 # --- 辅助变量 ---
 # 将TARGET_ARCH分割成数组
@@ -28,6 +36,12 @@ IFS="$OLD_IFS"
 CRON_LOG_FILE="${LOG_DIR}/cron.log"  # cron任务日志
 SYNC_LOG_FILE="${LOG_DIR}/sync_images_activity.log"  # 主同步日志
 PYTHON_CRAWLER_LOG_FILE="${LOG_DIR}/docker_hub_crawler_output.log"  # Python脚本的输出日志
+
+echo "目标架构列表: $TARGET_ARCHS"
+echo "日志文件:"
+echo "- 同步日志: $SYNC_LOG_FILE"
+echo "- Cron日志: $CRON_LOG_FILE"
+echo "- Python爬虫日志: $PYTHON_CRAWLER_LOG_FILE"
 
 # --- 依赖检查和设置 ---
 ensure_dependencies() {

@@ -22,6 +22,7 @@ RUN chmod +x /app/sync_images.sh
 # 创建启动脚本
 RUN printf '#!/bin/sh\n\
   # 启动 Docker 守护进程\n\
+  echo "正在启动 Docker 守护进程..."\n\
   dockerd > /var/log/dockerd.log 2>&1 &\n\
   \n\
   # 等待 Docker 守护进程准备就绪\n\
@@ -38,6 +39,7 @@ RUN printf '#!/bin/sh\n\
   echo "Docker 守护进程已启动"\n\
   \n\
   # 执行同步脚本\n\
+  echo "开始执行同步脚本..."\n\
   exec /app/sync_images.sh\n' > /app/entrypoint.sh && \
   chmod +x /app/entrypoint.sh
 
