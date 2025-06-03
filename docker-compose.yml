@@ -37,6 +37,9 @@ services:
       - REMOVE_LIBRARY_PREFIX_ON_LOCAL=true # 是否移除本地镜像的library/前缀
       - MAX_PAGES_PER_CATEGORY=1 # 控制 Python 脚本爬取的页数
       - CRAWL_AFTER_CUSTOM_IMAGES=false # 拉取custom_images镜像列表之后是否继续爬取DockerHub
+      - HTTP_PROXY=http://192.168.1.100:7890
+      - HTTPS_PROXY=http://192.168.1.100:7890
+      - NO_PROXY=localhost,127.0.0.1,docker.1panel.live,registry,192.168.1.100
     volumes:
       - ./custom_images.txt:/app/custom_images.txt:ro # 挂载自定义镜像列表文件（可选）
     restart: unless-stopped

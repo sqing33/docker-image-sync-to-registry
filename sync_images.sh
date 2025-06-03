@@ -42,11 +42,11 @@ SYNC_ON_START="${SYNC_ON_START:-true}"
 TARGET_ARCH="${TARGET_ARCH:-linux/amd64}"
 REMOVE_LIBRARY_PREFIX_ON_LOCAL="${REMOVE_LIBRARY_PREFIX_ON_LOCAL:-true}"
 PYTHON_SCRIPT_PATH="/app/docker_hub_crawler.py"
-IMAGE_LIST_DIR="/app/output"
+IMAGE_LIST_DIR="/app/output" # 爬虫脚本输出目录
 LOG_DIR="/var/log"
 MAX_PAGES_PER_CATEGORY="${MAX_PAGES_PER_CATEGORY:-1}"
 CUSTOM_IMAGES_FILE="/app/custom_images.txt"
-CRAWL_AFTER_CUSTOM_IMAGES="${CRAWL_AFTER_CUSTOM_IMAGES:-false}" # 新增参数：拉取custom_images镜像之后是否继续爬取DockerHub
+CRAWL_AFTER_CUSTOM_IMAGES="${CRAWL_AFTER_CUSTOM_IMAGES:-false}" # 拉取custom_images镜像之后是否继续爬取DockerHub
 
 # --- 辅助变量 ---
 OLD_IFS="$IFS"
@@ -59,13 +59,10 @@ done
 IFS="$OLD_IFS"
 TARGET_ARCHS=$(echo "$TARGET_ARCHS" | xargs) # 去除首尾空格
 
-# DOCKER_REGISTRY_HOST_FOR_CLI 用于 docker tag/push 等命令，不含协议
-# REGISTRY_URL_FOR_API_CALLS 用于 API 调用，会处理协议
 DOCKER_REGISTRY_HOST_FOR_CLI=""
 if [ -n "$REGISTRY_URL" ]; then
     DOCKER_REGISTRY_HOST_FOR_CLI=$(echo "$REGISTRY_URL" | sed -e 's|^[^/]*://||' -e 's|/.*$||')
 fi
-
 
 CRON_LOG_FILE="${LOG_DIR}/cron.log"
 SYNC_LOG_FILE="${LOG_DIR}/sync_images_activity.log"
@@ -134,7 +131,7 @@ log_config() {
 }
 
 get_arch_image_config_digest() {
-    local full_image_name="$1" # 格式可以是 docker.io/xxx 或 DOCKER_REGISTRY_HOST_FOR_CLI/xxx
+    local full_image_name="$1" 
     local target_arch="$2"
     local manifest_json
     local platform_manifest_entry_digest
@@ -170,7 +167,7 @@ get_arch_image_config_digest() {
                 image_config_digest_value=$(echo "$specific_image_manifest_json" | jq -r '.config.digest // ""' 2>/dev/null)
             fi
         fi
-            else # 不是 manifest 列表，视为单个 manifest
+            else 
                 local actual_os=$(echo "$manifest_json" | jq -r '.platform.os // ""' 2>/dev/null)
                 local actual_arch=$(echo "$manifest_json" | jq -r '.platform.architecture // ""' 2>/dev/null)
                 local target_os_val=$(echo "$target_arch" | cut -d/ -f1)
@@ -187,69 +184,27 @@ get_arch_image_config_digest() {
     echo "$image_config_digest_value"
 }
 
-sync_images() {
-    log_message "INFO" "🚀　开始镜像同步..."
-    mkdir -p "$IMAGE_LIST_DIR"
-    
-    local LATEST_FILE
-    local crawl_needed=false
+# 函数：处理单个镜像列表文件中的镜像
+# 参数1: 镜像列表文件的路径
+# 参数2: 用于存放此次处理过程中临时文件的目录路径
+process_image_list() {
+    local image_list_file_to_process="$1"
+    local current_processing_temp_dir="$2" 
 
-    if [ -f "$CUSTOM_IMAGES_FILE" ]; then
-        log_message "INFO" "使用自定义镜像列表: $CUSTOM_IMAGES_FILE"
-        LATEST_FILE="$CUSTOM_IMAGES_FILE"
-        if [ "$CRAWL_AFTER_CUSTOM_IMAGES" = "true" ]; then
-            log_message "INFO" "CRAWL_AFTER_CUSTOM_IMAGES 为 true，将在处理自定义镜像后继续爬取 Docker Hub。"
-            crawl_needed=true
-        else
-            log_message "INFO" "CRAWL_AFTER_CUSTOM_IMAGES 为 false，将只使用自定义镜像列表。"
-        fi
-    else
-        log_message "INFO" "未找到自定义镜像列表，将使用爬虫获取。"
-        crawl_needed=true
+    if [ ! -f "$image_list_file_to_process" ]; then
+        log_message "WARN" "镜像列表文件 '$image_list_file_to_process' 不存在，跳过处理。"
+        return
     fi
 
-    if [ "$crawl_needed" = "true" ]; then
-        log_message "INFO" "执行 Python 爬虫脚本: $PYTHON_SCRIPT_PATH (MAX_PAGES_PER_CATEGORY=$MAX_PAGES_PER_CATEGORY)"
-        if ! MAX_PAGES_PER_CATEGORY="$MAX_PAGES_PER_CATEGORY" python3 "$PYTHON_SCRIPT_PATH" > "$PYTHON_CRAWLER_LOG_FILE" 2>&1; then
-            log_message "ERROR" "Python 脚本执行失败。详情请查看 $PYTHON_CRAWLER_LOG_FILE"
-            return 1
-        fi
-        log_message "INFO" "Python 脚本执行完成。"
-        # 如果有自定义镜像文件，则将爬取结果追加到自定义镜像文件，否则直接使用爬取结果
-        if [ -f "$CUSTOM_IMAGES_FILE" ] && [ "$CRAWL_AFTER_CUSTOM_IMAGES" = "true" ]; then
-            local crawled_file=$(ls -t "${IMAGE_LIST_DIR}/docker_images_"*.txt 2>/dev/null | head -n1)
-            if [ -n "$crawled_file" ] && [ -f "$crawled_file" ]; then
-                log_message "INFO" "将爬取结果 ($crawled_file) 追加到自定义镜像列表 ($CUSTOM_IMAGES_FILE)。"
-                cat "$crawled_file" >> "$CUSTOM_IMAGES_FILE"
-                rm "$crawled_file" # 清理临时爬取文件
-            fi
-        fi
-    fi
+    log_message "INFO" "开始处理镜像列表文件: $image_list_file_to_process"
 
-    # 最终使用的镜像列表文件
-    if [ -f "$CUSTOM_IMAGES_FILE" ]; then
-        LATEST_FILE="$CUSTOM_IMAGES_FILE"
-    else
-        LATEST_FILE=$(ls -t "${IMAGE_LIST_DIR}/docker_images_"*.txt 2>/dev/null | head -n1)
-    fi
-
-    if [ -z "$LATEST_FILE" ] || [ ! -f "$LATEST_FILE" ]; then
-        log_message "ERROR" "未找到有效的镜像列表文件 (期望在 $IMAGE_LIST_DIR 下找到 docker_images_*.txt 或 $CUSTOM_IMAGES_FILE)。"
-        return 1
-    fi
-    log_message "INFO" "最终使用的镜像列表: $LATEST_FILE"
-    
-    local current_temp_dir
-    current_temp_dir=$(mktemp -d)
-    trap 'log_message "INFO" "🗑️ 清理临时目录: $current_temp_dir"; rm -rf "$current_temp_dir"; trap - EXIT INT TERM' EXIT INT TERM
-
-    cat "$LATEST_FILE" | while IFS= read -r image_from_crawler || [ -n "$image_from_crawler" ]; do
-        if [ -z "$image_from_crawler" ]; then
+    cat "$image_list_file_to_process" | while IFS= read -r image_from_list || [ -n "$image_from_list" ]; do
+        if [ -z "$image_from_list" ]; then
             continue
         fi
 
-        image_name_part=$(echo "$image_from_crawler" | cut -d: -f1)
-        image_tag_part=$(echo "$image_from_crawler" | cut -d: -f2)
+        image_name_part=$(echo "$image_from_list" | cut -d: -f1)
+        image_tag_part=$(echo "$image_from_list" | cut -d: -f2)
         local image_tag
         if [ "$image_name_part" == "$image_tag_part" ] || [ -z "$image_tag_part" ]; then 
             image_tag="latest"
@@ -275,15 +230,13 @@ sync_images() {
             actual_local_repo_path="$hub_image_name_ns"
         fi
         
-        # hub_image_full 是 Docker Hub 上的源镜像 (格式: docker.io/...)
         local hub_image_full="docker.io/${hub_image_name_ns}:${image_tag}"
-        # local_image_full 是私有仓库中多架构 manifest 的目标标签 (格式: DOCKER_REGISTRY_HOST_FOR_CLI/...)
         local local_image_full="${DOCKER_REGISTRY_HOST_FOR_CLI}/${actual_local_repo_path}:${image_tag}"
 
-        log_message "INFO" "处理镜像: $hub_image_full -> $local_image_full"
+        log_message "INFO" "处理镜像: $hub_image_full -> $local_image_full (来自 $image_list_file_to_process)"
 
-        local archs_to_sync_file="$current_temp_dir/archs_to_sync_${image_name_part//\//_}_${image_tag}.txt"
-        local arch_images_for_manifest_file="$current_temp_dir/arch_images_for_manifest_${image_name_part//\//_}_${image_tag}.txt"
+        local archs_to_sync_file="$current_processing_temp_dir/archs_to_sync_${image_name_part//\//_}_${image_tag}.txt"
+        local arch_images_for_manifest_file="$current_processing_temp_dir/arch_images_for_manifest_${image_name_part//\//_}_${image_tag}.txt"
         >"$archs_to_sync_file"; >"$arch_images_for_manifest_file"
 
         local needs_sync_overall=false
@@ -314,12 +267,11 @@ sync_images() {
                 continue 
             fi
             
-            # local_image_full 已经是不带协议的格式
             local_config_digest=$(get_arch_image_config_digest "$local_image_full" "$target_arch_loop") 
             if [ "$hub_config_digest" == "$local_config_digest" ]; then
-                log_message "INFO" "✅　本地镜像 $local_image_full ($target_arch_loop) 已是最新版本 (Digest: $hub_config_digest)。"
+                log_message "INFO" "✅ 本地镜像 $local_image_full ($target_arch_loop) 已是最新版本 (Digest: $hub_config_digest)。"
             else
-                log_message "INFO" "🔄　本地镜像 $local_image_full ($target_arch_loop) 需要更新 (Hub Digest: $hub_config_digest, Local Digest: ${local_config_digest:-'不存在或无法获取'})。"
+                log_message "INFO" "🔄 本地镜像 $local_image_full ($target_arch_loop) 需要更新 (Hub Digest: $hub_config_digest, Local Digest: ${local_config_digest:-'不存在或无法获取'})。"
                 echo "$target_arch_loop" >> "$archs_to_sync_file"
                 needs_sync_overall=true
             fi
@@ -341,23 +293,22 @@ sync_images() {
         while IFS= read -r current_target_arch_sync; do
             log_message "INFO" "处理架构: $current_target_arch_sync for $hub_image_full"
             
-            log_message "INFO" "⬇️　拉取 $hub_image_full (架构: $current_target_arch_sync)..."
+            log_message "INFO" "⬇️ 拉取 $hub_image_full (架构: $current_target_arch_sync)..."
             if ! docker pull --platform "$current_target_arch_sync" "$hub_image_full"; then
                 log_message "ERROR" "拉取 $hub_image_full (架构: $current_target_arch_sync) 失败。"
                 continue
             fi
             
-            # local_image_arch_tagged 使用不带协议的 local_image_full
-            local local_image_arch_tagged="${local_image_full}-${current_target_arch_sync//\//-}" # 格式: DOCKER_REGISTRY_HOST_FOR_CLI/image:tag-arch
+            local local_image_arch_tagged="${local_image_full}-${current_target_arch_sync//\//-}" 
             
-            log_message "INFO" "🏷️　标记 $hub_image_full 为 $local_image_arch_tagged"
+            log_message "INFO" "🏷️ 标记 $hub_image_full 为 $local_image_arch_tagged"
             if ! docker tag "$hub_image_full" "$local_image_arch_tagged"; then
                 log_message "ERROR" "标记 $hub_image_full 为 $local_image_arch_tagged 失败。"
                 docker rmi "$hub_image_full" 2>/dev/null || true
                 continue
             fi
 
-            log_message "INFO" "⬆️　推送带架构的镜像 $local_image_arch_tagged 到私有仓库..."
+            log_message "INFO" "⬆️ 推送带架构的镜像 $local_image_arch_tagged 到私有仓库..."
             if ! docker push "$local_image_arch_tagged"; then
                 log_message "ERROR" "推送带架构的镜像 $local_image_arch_tagged 失败。"
                 docker rmi "$local_image_arch_tagged" 2>/dev/null || true
@@ -365,7 +316,7 @@ sync_images() {
                 continue
             fi
             
-            log_message "INFO" "✅　成功推送 $local_image_arch_tagged. 添加到 manifest 创建列表。"
+            log_message "INFO" "✅ 成功推送 $local_image_arch_tagged. 添加到 manifest 创建列表。"
             echo "$local_image_arch_tagged" >> "$arch_images_for_manifest_file"
             any_arch_pushed_successfully=true
 
@@ -373,29 +324,29 @@ sync_images() {
         done < "$archs_to_sync_file"
 
         if [ "$any_arch_pushed_successfully" = true ] && [ -s "$arch_images_for_manifest_file" ]; then
-            log_message "INFO" "📦　准备为 $local_image_full 创建多架构 manifest..."
-            MANIFEST_IMAGES_ARGS=$(cat "$arch_images_for_manifest_file" | xargs) # 包含 DOCKER_REGISTRY_HOST_FOR_CLI/... 格式的镜像
+            log_message "INFO" "📦 准备为 $local_image_full 创建多架构 manifest..."
+            MANIFEST_IMAGES_ARGS=$(cat "$arch_images_for_manifest_file" | xargs) 
             log_message "INFO" "使用已推送的架构镜像创建 manifest: $MANIFEST_IMAGES_ARGS"
 
             log_message "INFO" "尝试移除旧 manifest list: $local_image_full (如果存在)"
-            docker manifest rm "$local_image_full" 2>/dev/null || true # local_image_full 是 DOCKER_REGISTRY_HOST_FOR_CLI/... 格式
+            docker manifest rm "$local_image_full" 2>/dev/null || true 
 
             if ! docker manifest create "$local_image_full" $MANIFEST_IMAGES_ARGS; then
                 log_message "ERROR" "创建 manifest $local_image_full 失败。引用的镜像: $MANIFEST_IMAGES_ARGS"
             else
-                log_message "INFO" "✅　成功创建本地 manifest list: $local_image_full。开始推送..."
+                log_message "INFO" "✅ 成功创建本地 manifest list: $local_image_full。开始推送..."
                 if ! docker manifest push "$local_image_full"; then
                     log_message "ERROR" "推送 manifest $local_image_full 失败。"
                     docker manifest rm "$local_image_full" 2>/dev/null || true
                 else
-                    log_message "INFO" "🎉　成功创建并推送多架构 manifest: $local_image_full"
+                    log_message "INFO" "🎉 成功创建并推送多架构 manifest: $local_image_full"
                 fi
             fi
         elif [ "$arch_count" -gt 0 ]; then 
              log_message "WARN" "$hub_image_full 的部分或所有待同步架构未能成功推送到仓库，无法创建 manifest。"
         fi
 
-        log_message "INFO" "🧹　清理本地带架构后缀的镜像: $local_image_full..."
+        log_message "INFO" "🧹 清理本地带架构后缀的镜像: $local_image_full..."
         if [ -f "$arch_images_for_manifest_file" ]; then
             while IFS= read -r arch_image_to_remove_local; do
                 log_message "INFO" "移除本地镜像: $arch_image_to_remove_local"
@@ -403,8 +354,65 @@ sync_images() {
             done < "$arch_images_for_manifest_file"
         fi
         rm -f "$archs_to_sync_file" "$arch_images_for_manifest_file"
-    done < "$LATEST_FILE"
-    log_message "INFO" "✅　镜像同步执行完毕。"
+    done < "$image_list_file_to_process"
+    log_message "INFO" "处理镜像列表文件 '$image_list_file_to_process' 完成。"
+}
+
+
+sync_images() {
+    log_message "INFO" "🚀 开始镜像同步..."
+    mkdir -p "$IMAGE_LIST_DIR" # 确保爬虫输出目录存在
+
+    local current_run_temp_dir # 本次运行的顶层临时目录
+    current_run_temp_dir=$(mktemp -d)
+    # trap 命令确保在脚本退出（正常或异常）时清理临时目录
+    trap 'log_message "INFO" "🗑️ 清理临时目录: $current_run_temp_dir"; rm -rf "$current_run_temp_dir"; trap - EXIT INT TERM' EXIT INT TERM
+
+    # 步骤 1: 处理自定义镜像列表 (如果存在)
+    if [ -f "$CUSTOM_IMAGES_FILE" ]; then
+        log_message "INFO" "发现自定义镜像列表: $CUSTOM_IMAGES_FILE。将首先处理此文件中的镜像。"
+        process_image_list "$CUSTOM_IMAGES_FILE" "$current_run_temp_dir"
+    else
+        log_message "INFO" "未找到自定义镜像列表 ($CUSTOM_IMAGES_FILE)。"
+    fi
+
+    # 步骤 2: 判断是否需要爬取 Docker Hub
+    local crawl_needed=false
+    if [ ! -f "$CUSTOM_IMAGES_FILE" ]; then # 如果自定义文件不存在，则必须爬取
+        log_message "INFO" "由于自定义镜像列表不存在，将爬取 Docker Hub。"
+        crawl_needed=true
+    elif [ "$CRAWL_AFTER_CUSTOM_IMAGES" = "true" ]; then # 如果自定义文件存在且设置为之后爬取
+        log_message "INFO" "CRAWL_AFTER_CUSTOM_IMAGES 为 true，将在处理自定义镜像（如果已处理）后继续爬取 Docker Hub。"
+        crawl_needed=true
+    else
+        log_message "INFO" "CRAWL_AFTER_CUSTOM_IMAGES 为 false，并且已处理自定义镜像（如果存在）。不进行爬取。"
+    fi
+
+    # 步骤 3: 如果需要，执行爬虫并处理爬取结果
+    if [ "$crawl_needed" = "true" ]; then
+        log_message "INFO" "执行 Python 爬虫脚本: $PYTHON_SCRIPT_PATH (MAX_PAGES_PER_CATEGORY=$MAX_PAGES_PER_CATEGORY)"
+        if ! MAX_PAGES_PER_CATEGORY="$MAX_PAGES_PER_CATEGORY" python3 "$PYTHON_SCRIPT_PATH" > "$PYTHON_CRAWLER_LOG_FILE" 2>&1; then
+            log_message "ERROR" "Python 脚本执行失败。详情请查看 $PYTHON_CRAWLER_LOG_FILE"
+            # 根据需求，如果爬虫失败是否要终止整个同步，可以在此加 return 1
+        else
+            log_message "INFO" "Python 脚本执行完成。"
+            local crawled_images_file # 爬虫生成的文件
+            # 总是从爬虫输出目录获取最新的文件
+            crawled_images_file=$(ls -t "${IMAGE_LIST_DIR}/docker_images_"*.txt 2>/dev/null | head -n1)
+
+            if [ -n "$crawled_images_file" ] && [ -f "$crawled_images_file" ]; then
+                log_message "INFO" "发现爬虫生成的镜像列表: $crawled_images_file。将处理此文件中的镜像。"
+                process_image_list "$crawled_images_file" "$current_run_temp_dir"
+                # 可选：处理完后删除临时的爬虫文件
+                # log_message "INFO" "考虑删除已处理的爬虫文件: $crawled_images_file"
+                # rm "$crawled_images_file"
+            else
+                log_message "WARN" "Python 脚本执行完毕，但未找到有效的爬虫生成的镜像列表文件 (期望在 $IMAGE_LIST_DIR 下找到 docker_images_*.txt)。"
+            fi
+        fi
+    fi
+    
+    log_message "INFO" "✅ 镜像同步执行完毕。"
 }
 
 # --- 主逻辑 ---
@@ -426,7 +434,7 @@ if command -v crond > /dev/null; then
     CRONTAB_FILE="/var/spool/cron/crontabs/root" 
     log_message "INFO" "设置 cron 任务: '$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1' in $CRONTAB_FILE"
     touch "$CRONTAB_FILE" 
-    echo "" > "$CRONTAB_FILE" 
+    echo "" > "$CRONTAB_FILE" # 清空旧的 crontab 内容
     echo "$CRON_SCHEDULE /app/sync_images.sh sync >> $SYNC_LOG_FILE 2>&1" >> "$CRONTAB_FILE"
     log_message "INFO" "启动 crond 服务 (日志输出到 $CRON_LOG_FILE)..."
     crond -b -S -l 8 -L "$CRON_LOG_FILE" 
@@ -436,5 +444,7 @@ fi
 
 log_message "INFO" "脚本启动完成。查看日志: $SYNC_LOG_FILE, $CRON_LOG_FILE, $PYTHON_CRAWLER_LOG_FILE"
 if [ "$1" != "sync" ]; then
+    # tail -F 持续监控文件，直到被中断
+    # /dev/null 确保即使前面的文件不存在，tail 仍然有东西可以监控，防止立即退出
     tail -F "$SYNC_LOG_FILE" "$CRON_LOG_FILE" "$PYTHON_CRAWLER_LOG_FILE" /dev/null
 fi
