@@ -16,7 +16,7 @@
 
 ## 项目地址
 
-- Github：[https://github.com/sqing33/docker_image_sync_to_registry](https://github.com/sqing33/docker_image_sync_to_registry)
+- Github：[https://github.com/sqing33/docker-image-sync-to-registry](https://github.com/sqing33/docker-image-sync-to-registry)
 - DockerHub：[https://hub.docker.com/r/sqing33/docker-image-sync-to-registry](https://hub.docker.com/r/sqing33/docker-image-sync-to-registry)
 - CSDN：[在NAS上的Docker部署的Docker私有镜像仓库Registry，以及我自己写的自动同步镜像到Registry仓库的工具docker-image-sync-to-registry](https://blog.csdn.net/qq_31800065/article/details/148399988?fromshare=blogdetail&sharetype=blogdetail&sharerId=148399988&sharerefer=PC&sharesource=qq_31800065&sharefrom=from_link)
 - Bilibili：[在NAS上的Docker部署的Docker私有镜像仓库Registry，以及我自己写的自动同步镜像到Registry仓库的工具docker-image-sync-to-registry](https://www.bilibili.com/video/BV1Uu7hzbETp/?vd_source=d40d3767c32940d1e760d790397e266d)
@@ -192,6 +192,10 @@ networks:
    - 使用 docker push 推送到私有仓库
 
 ## 项目截图
+![image](https://github.com/user-attachments/assets/ca806167-c292-4f02-92c7-59856e39d450)
+![image](https://github.com/user-attachments/assets/06f6e3ac-ab7a-44fa-9c40-c39063ae5c91)
+![image](https://github.com/user-attachments/assets/93703fde-8f8e-46ac-9bd3-afe10fae06eb)
+![image](https://github.com/user-attachments/assets/b403ef55-0699-4f7a-9357-276638742dad)
 
 ## 故障排除
 
