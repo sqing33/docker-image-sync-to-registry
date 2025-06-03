@@ -26,8 +26,8 @@
 1. 克隆仓库：
 
 ```bash
-git clone https://github.com/sqing33/docker_image_sync_to_registry.git
-cd docker_image_sync_to_registry
+git clone https://github.com/sqing33/docker-image-sync-to-registry.git
+cd docker-image-sync-to-registry
 ```
 
 2. 配置环境：
