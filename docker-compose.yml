@@ -33,19 +33,19 @@ services:
       - REGISTRY_URL=http://registry:5000 # 镜像仓库地址
       - CRON_SCHEDULE=0 4 * * * # 每天凌晨4点执行
       - SYNC_ON_START=true # 容器启动时立即同步
-      - TARGET_ARCH=linux/amd64 # 目标架构
+      - TARGET_ARCH=linux/amd64 # 目标架构(linux/amd64,linux/arm64)
       - REMOVE_LIBRARY_PREFIX_ON_LOCAL=true # 是否移除本地镜像的library/前缀
       - MAX_PAGES_PER_CATEGORY=1 # 控制 Python 脚本爬取的页数
       - CRAWL_AFTER_CUSTOM_IMAGES=true # 拉取custom_images镜像列表之后是否继续爬取DockerHub
       - HTTP_PROXY=http://192.168.1.100:7890
       - HTTPS_PROXY=http://192.168.1.100:7890
-      - NO_PROXY=localhost,127.0.0.1,docker.1panel.live,http://registry:5000
+      - NO_PROXY=localhost,127.0.0.1,docker.1panel.live,docker.1ms.run,http://registry:5000
     volumes:
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
-      - /vol1/1000/Docker/docker-image-sync-to-registry/daemon.json:/etc/docker/daemon.json
-      - /vol3/1000/Docker镜像仓库/docker缓存:/var/lib/docker/overlay2
-      - /vol1/1000/Docker/docker-image-sync-to-registry/custom_images.txt:/app/custom_images.txt:ro
+      - /etc/timezone:/etc/timezone:ro # 容器时区同步宿主机
+      - /etc/localtime:/etc/localtime:ro # 容器时间同步宿主机
+      - /vol1/1000/Docker/docker-image-sync-to-registry/daemon.json:/etc/docker/daemon.json # 设置容器Docker加速源
+      - /vol3/1000/Docker镜像仓库/docker缓存:/var/lib/docker/overlay2 # 挂载容器Docker下载镜像的目录
+      - /vol1/1000/Docker/docker-image-sync-to-registry/custom_images.txt:/app/custom_images.txt:ro # 自定义镜像列表文件
     networks:
       - registry
 
