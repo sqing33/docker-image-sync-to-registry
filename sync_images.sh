@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# sync_images.sh
-# 这个脚本用于同步 Docker Hub 镜像到本地私有仓库
-# 它会定期从 Docker Hub 拉取镜像并推送到本地仓库。
-# 架构特定的标签 (如 image:tag-linux-amd64) 将保留在私有仓库中。
-
 # 添加日志函数
 log_message() {
     local level="$1"
