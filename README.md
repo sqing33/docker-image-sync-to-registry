@@ -18,8 +18,8 @@
 
 - Github：[https://github.com/sqing33/docker_image_sync_to_registry](https://github.com/sqing33/docker_image_sync_to_registry)
 - DockerHub：[https://hub.docker.com/r/sqing33/docker-image-sync-to-registry](https://hub.docker.com/r/sqing33/docker-image-sync-to-registry)
-- CSDN：
-- Bilibili：
+- CSDN：[在NAS上的Docker部署的Docker私有镜像仓库Registry，以及我自己写的自动同步镜像到Registry仓库的工具docker-image-sync-to-registry](https://blog.csdn.net/qq_31800065/article/details/148399988?fromshare=blogdetail&sharetype=blogdetail&sharerId=148399988&sharerefer=PC&sharesource=qq_31800065&sharefrom=from_link)
+- Bilibili：[在NAS上的Docker部署的Docker私有镜像仓库Registry，以及我自己写的自动同步镜像到Registry仓库的工具docker-image-sync-to-registry](https://www.bilibili.com/video/BV1Uu7hzbETp/?vd_source=d40d3767c32940d1e760d790397e266d)
 
 ## 快速开始
 
